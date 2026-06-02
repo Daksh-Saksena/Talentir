@@ -34,6 +34,15 @@ export default function LiveClassPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAttendance, setShowAttendance] = useState(false);
   const [attendanceIndex, setAttendanceIndex] = useState(-1);
+  const [autoAttendance, setAutoAttendance] = useState(false);
+  const [attendanceCount, setAttendanceCount] = useState(0);
+  const [detectedFaceCount, setDetectedFaceCount] = useState(0);
+  const detectedFaceCountRef = useRef(0);
+  const [fullAttendance, setFullAttendance] = useState(false);
+  const [pendingAttendanceCount, setPendingAttendanceCount] = useState(0);
+  const [showConfirmAttendance, setShowConfirmAttendance] = useState(false);
+  const [attendanceConfirmed, setAttendanceConfirmed] = useState(false);
+  const [attendancePopupClosed, setAttendancePopupClosed] = useState(false);
   const [mood, setMood] = useState("default");
   
   // NEW DASHBOARD STATES
@@ -59,6 +68,7 @@ export default function LiveClassPage() {
   const sessionStartRef = useRef<number>(0);
   
   const attendanceIndexRef = useRef(-1);
+  const enrolledProfilesRef = useRef<any[]>([]);
   const lastProcessedRef = useRef("");
   const isSpeakingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -72,8 +82,20 @@ export default function LiveClassPage() {
     { name: "Arjun", status: "pending" }, { name: "Zoya", status: "pending" },
     { name: "Ishaan", status: "pending" }, { name: "Kavya", status: "pending" }
   ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedProfiles = JSON.parse(localStorage.getItem('cc-face-profiles') || '[]');
+    if (savedProfiles.length > 0) {
+      const studentProfiles = savedProfiles.filter((p: any) => p.role === 'student');
+      if (studentProfiles.length > 0) {
+        setStudents(studentProfiles.map((p: any) => ({ name: p.name, status: 'pending' as const })));
+      }
+    }
+  }, []);
   
   const transcriptBuffer = useRef<string[]>([]);
+  const wikiFetchController = useRef<AbortController | null>(null);
   const questionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -156,6 +178,7 @@ export default function LiveClassPage() {
 
         // Build face matcher from enrolled profiles
         const savedProfiles = JSON.parse(localStorage.getItem('cc-face-profiles') || '[]');
+        enrolledProfilesRef.current = savedProfiles;
         let faceMatcher: any = null;
         if (savedProfiles.length > 0) {
           const labeledDescriptors = savedProfiles.map((p: any) =>
@@ -168,7 +191,7 @@ export default function LiveClassPage() {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' } });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // autoPlay on the element handles playback
+          await videoRef.current.play().catch(() => {});
         }
 
         faceIntervalRef.current = setInterval(async () => {
@@ -196,6 +219,9 @@ export default function LiveClassPage() {
               if (dbgCtx) dbgCtx.clearRect(0, 0, dbgCanvas.width, dbgCanvas.height);
             }
 
+            const rosterNames = new Set(students.map(s => s.name.toLowerCase()));
+            const recognizedStudentNames = new Set<string>();
+
             detections.forEach((d: any) => {
               const exp = d.expressions;
               // Expression-based attention
@@ -211,7 +237,14 @@ export default function LiveClassPage() {
               let personName = 'Unknown';
               if (faceMatcher) {
                 const match = faceMatcher.findBestMatch(d.descriptor);
-                if (match.label !== 'unknown') personName = match.label;
+                if (match.label !== 'unknown') {
+                  personName = match.label.trim();
+                }
+              }
+
+              const normalizedName = personName.toLowerCase();
+              if (personName !== 'Unknown' && rosterNames.has(normalizedName)) {
+                recognizedStudentNames.add(normalizedName);
               }
 
               // Track per-student stats
@@ -275,6 +308,42 @@ export default function LiveClassPage() {
               }
             });
 
+            const presentCount = students.filter((s) => recognizedStudentNames.has(s.name.toLowerCase())).length;
+            const isFullAttendance = presentCount > 0 && presentCount === students.length;
+            setFullAttendance(isFullAttendance);
+            setDetectedFaceCount(count);
+            detectedFaceCountRef.current = count;
+            setAutoAttendance(isFullAttendance);
+            setShowAttendance(!attendanceConfirmed && !attendancePopupClosed && (count > 0 || attendanceIndex >= 0));
+            if (count > 0) {
+              setPendingAttendanceCount(count);
+              if (isFullAttendance) {
+                setAttendanceConfirmed(true);
+                setShowConfirmAttendance(false);
+                setShowAttendance(false);
+                setAttendancePopupClosed(true);
+              } else if (!attendancePopupClosed && !attendanceConfirmed) {
+                setShowConfirmAttendance(true);
+              }
+              setStudents(prev => {
+                const updated = prev.map((s) => recognizedStudentNames.has(s.name.toLowerCase()) ? { ...s, status: 'present' as const } : s);
+                return updated;
+              });
+              setAttendanceCount(presentCount);
+            } else {
+              setAttendanceCount(0);
+              setDetectedFaceCount(0);
+              detectedFaceCountRef.current = 0;
+              if (!attendanceConfirmed) {
+                setAttendancePopupClosed(false);
+              }
+              if (attendanceConfirmed) {
+                setShowConfirmAttendance(false);
+                setPendingAttendanceCount(0);
+                setShowAttendance(false);
+              }
+            }
+
             // Update attention & engagement
             setAttention(Math.round((totalAttention / count) * 100));
             setEngagement({
@@ -312,16 +381,42 @@ export default function LiveClassPage() {
       if (cleaned === lastProcessedRef.current) return;
       if (hasAbsent) {
         lastProcessedRef.current = cleaned;
-        setStudents(prev => prev.map((s, i) => i === currentIndex ? { ...s, status: 'absent' } : s));
+        setStudents(prev => {
+          const updated = prev.map((s, i) => i === currentIndex ? { ...s, status: 'absent' as const } : s);
+          setAttendanceCount(updated.filter((s) => s.status === 'present').length);
+          return updated;
+        });
         setAttendanceIndex(currentIndex + 1);
         return;
       } else if (hasPresent) {
         lastProcessedRef.current = cleaned;
-        setStudents(prev => prev.map((s, i) => i === currentIndex ? { ...s, status: 'present' } : s));
+        setStudents(prev => {
+          const updated = prev.map((s, i) => i === currentIndex ? { ...s, status: 'present' as const } : s);
+          setAttendanceCount(updated.filter((s) => s.status === 'present').length);
+          return updated;
+        });
         setAttendanceIndex(currentIndex + 1);
         return;
       }
     }
+
+    const isAttendanceCommand = cleaned.includes("ai take attendance") || cleaned.includes("ai take attendence") || cleaned.includes("take attendance") || cleaned.includes("attendance check");
+    if (isAttendanceCommand) {
+      const currentFaceCount = detectedFaceCountRef.current || detectedFaceCount;
+      if (fullAttendance) {
+        setAttendanceConfirmed(true);
+        setShowConfirmAttendance(false);
+      } else if (currentFaceCount > 0) {
+        setAttendancePopupClosed(false);
+        setShowAttendance(true);
+        setShowConfirmAttendance(true);
+        setPendingAttendanceCount(currentFaceCount);
+      } else {
+        speak("I can't see any faces yet. Please make sure students are visible to the camera.");
+      }
+      return;
+    }
+
     if (cleaned.includes("generate quiz") || cleaned.includes("start quiz") || cleaned.includes("make a quiz")) {
       generateQuiz(); return;
     }
@@ -471,7 +566,8 @@ export default function LiveClassPage() {
     }
     setThinking("AI Thinking...");
     try {
-      const context = transcriptBuffer.current.join(" ");
+      // Use only the most recent transcript segments to stay relevant
+      const context = isTrigger ? "" : transcriptBuffer.current.slice(-2).join(" ");
       const prompt = `Transcript: "${context}". You are a proactive classroom visual assistant.
       RULES:
       - ALWAYS set "type" to "image" unless a PhET simulation keyword matches. NEVER return "none" unless the transcript is empty gibberish.
@@ -492,41 +588,94 @@ export default function LiveClassPage() {
 
       if (dec.type !== "none") {
           setIsRefreshing(true);
+          // Cancel any previous in-flight wiki fetch
+          if (wikiFetchController.current) wikiFetchController.current.abort();
+          wikiFetchController.current = new AbortController();
+          const signal = wikiFetchController.current.signal;
+
           let finalUrl = null;
-          if (dec.type === "video") finalUrl = await fetchWikiMedia(dec.key, true);
-          if (!finalUrl && (dec.type === "image" || dec.type === "video")) finalUrl = await fetchWikiMedia(dec.key, false);
-          setTimeout(() => {
-            if (dec.type === "sim" && SIMS[dec.key]) setActiveMedia({ type: "sim", key: SIMS[dec.key], caption: dec.caption });
-            else if (dec.type === "formula") setActiveMedia({ type: "formula", key: dec.key, caption: dec.caption });
-            else if (finalUrl) setActiveMedia({ type: dec.type as any, key: dec.key, caption: dec.caption, url: finalUrl });
-            setIsRefreshing(false);
-          }, 400);
+          if (dec.type === "video") finalUrl = await fetchWikiMedia(dec.key, true, signal);
+          if (!finalUrl && (dec.type === "image" || dec.type === "video")) finalUrl = await fetchWikiMedia(dec.key, false, signal);
+
+          // Apply update immediately when we have a URL
+          if (dec.type === "sim" && SIMS[dec.key]) {
+            setActiveMedia({ type: "sim", key: SIMS[dec.key], caption: dec.caption });
+          } else if (dec.type === "formula") {
+            setActiveMedia({ type: "formula", key: dec.key, caption: dec.caption });
+          } else if (finalUrl) {
+            setActiveMedia({ type: dec.type as any, key: dec.key, caption: dec.caption, url: finalUrl });
+          }
+
+          setIsRefreshing(false);
       } else if (isTrigger) setActiveMedia(null);
       setThinking("Active");
     } catch (e: any) { setThinking("Error"); }
   };
 
-  const fetchWikiMedia = async (query: string, animatedOnly: boolean) => {
+  const fetchWikiMedia = async (query: string, animatedOnly: boolean, signal?: AbortSignal) => {
     try {
-       const searchQuery = animatedOnly ? `${query} filetype:gif` : query;
-       const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(searchQuery)}&gsrlimit=1&prop=pageimages|images&pithumbsize=1200`);
-       const data = await res.json();
-       if (!data.query?.pages) return null;
-       const pages = data.query.pages;
-       const pageId = Object.keys(pages)[0];
-       if (animatedOnly) {
-         const images = pages[pageId].images;
-         if (images) {
-           const gifFile = images.find((img: any) => img.title.toLowerCase().endsWith('.gif'));
-           if (gifFile) {
-             const fileRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(gifFile.title)}&prop=imageinfo&iiprop=url`);
-             const fileData = await fileRes.json();
-             return fileData.query.pages[Object.keys(fileData.query.pages)[0]].imageinfo[0].url;
-           }
-         }
-       }
-       return pages[pageId].thumbnail?.source || null;
-    } catch (e) { return null; }
+      const searchQuery = animatedOnly ? `${query} filetype:gif` : query;
+      // Request several results to improve variety and hit-rate
+      const res = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(
+          searchQuery
+        )}&gsrlimit=5&prop=pageimages|images&pithumbsize=1200`
+      , { signal }
+      );
+      const data = await res.json();
+      if (!data.query?.pages) return null;
+      const pages = Object.values(data.query.pages) as any[];
+
+      // Prefer pages that already include a thumbnail for speed
+      for (const p of pages) {
+        if (p.thumbnail?.source) return `${p.thumbnail.source}?cb=${Date.now()}`;
+      }
+
+      // If animatedOnly requested, try to find a GIF among image lists
+      if (animatedOnly) {
+        for (const p of pages) {
+          const images = p.images || [];
+          const gifFile = images.find((img: any) => img.title?.toLowerCase().endsWith('.gif'));
+          if (gifFile) {
+            const fileRes = await fetch(
+              `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(
+                gifFile.title
+              )}&prop=imageinfo&iiprop=url`
+            , { signal }
+            );
+            const fileData = await fileRes.json();
+            const filePage = fileData.query?.pages ? fileData.query.pages[Object.keys(fileData.query.pages)[0]] : null;
+            const url = filePage?.imageinfo?.[0]?.url;
+            if (url) return `${url}?cb=${Date.now()}`;
+          }
+        }
+      }
+
+      // Otherwise, fallback to any image listed on the pages (jpg/png/webp)
+      for (const p of pages) {
+        const images = p.images || [];
+        for (const img of images) {
+          if (/\.(jpe?g|png|webp|svg)$/i.test(img.title || "")) {
+            const fileRes = await fetch(
+              `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(
+                img.title
+              )}&prop=imageinfo&iiprop=url`
+            , { signal }
+            );
+            const fileData = await fileRes.json();
+            const filePage = fileData.query?.pages ? fileData.query.pages[Object.keys(fileData.query.pages)[0]] : null;
+            const url = filePage?.imageinfo?.[0]?.url;
+            if (url) return `${url}?cb=${Date.now()}`;
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      // If aborted, just return null silently
+      if ((e as any)?.name === 'AbortError') return null;
+      return null;
+    }
   };
 
   const moodMap: Record<string, string> = {
@@ -580,6 +729,37 @@ export default function LiveClassPage() {
             <span className="text-sm font-bold tracking-widest text-indigo-400 uppercase drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">{topic}</span>
          </div>
       </div>
+      {!attendancePopupClosed && (attendanceCount > 0 || detectedFaceCount > 0) && (
+        <div className="absolute top-[74px] inset-x-0 z-50 flex justify-center pointer-events-none">
+          <div className="relative px-6 py-3 bg-slate-950/95 border border-white/10 rounded-full shadow-2xl backdrop-blur-lg animate-fade-in">
+            <button
+              onClick={() => {
+                setAttendancePopupClosed(true);
+                setShowAttendance(false);
+                setShowConfirmAttendance(false);
+              }}
+              className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-xs text-slate-300 hover:bg-white/10 pointer-events-auto"
+              aria-label="Close attendance summary"
+            >
+              ✕
+            </button>
+            <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">Attendance</div>
+            <div className="text-sm font-black uppercase tracking-[0.2em] text-white">
+              {attendanceCount > 0 ? `${attendanceCount} / ${students.length} present` : `${detectedFaceCount} face${detectedFaceCount === 1 ? '' : 's'} detected`}
+            </div>
+            {fullAttendance && (
+              <div className="mt-1 inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-emerald-300 border border-emerald-500/30">
+                FULL ATTENDANCE
+              </div>
+            )}
+            {!fullAttendance && detectedFaceCount > 0 && !showConfirmAttendance && !attendanceConfirmed && (
+              <div className="mt-1 text-[10px] uppercase tracking-[0.25em] text-slate-400">
+                Say "AI take attendance" to count faces and confirm attendance.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* LEFT SUMMARY PANEL */}
       <div className="absolute left-6 top-1/2 -translate-y-1/2 w-72 z-50 pointer-events-none flex flex-col gap-4">
@@ -615,7 +795,7 @@ export default function LiveClassPage() {
       </div>
 
       {/* Attendance Overlay */}
-      <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
+      <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance || (pendingAttendanceCount > 0 && !attendanceConfirmed) ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
          <div className="bg-white/5 backdrop-blur-3xl border-b border-white/10 w-full p-10 flex flex-col items-center justify-center gap-10">
             <div className="flex flex-wrap gap-4 justify-center max-w-5xl">
                 {students.map((s, i) => (
@@ -629,6 +809,56 @@ export default function LiveClassPage() {
                   </div>
                 ))}
             </div>
+            <div className="flex flex-col items-center gap-2 text-center">
+               <div className="text-sm uppercase tracking-[0.4em] text-white/40">Attendance</div>
+               <div className="text-3xl font-black text-white tracking-[0.15em]">
+                 {attendanceCount} / {students.length} present
+               </div>
+               {fullAttendance ? (
+                 <div className="px-4 py-2 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] uppercase tracking-[0.35em] font-black border border-emerald-500/30">
+                   FULL ATTENDANCE
+                 </div>
+               ) : (
+                 <div className="px-4 py-2 rounded-full bg-white/5 text-white/40 text-[10px] uppercase tracking-[0.35em] font-black border border-white/10">
+                   {autoAttendance ? 'Auto attendance active' : 'Manual attendance mode'}
+                 </div>
+               )}
+            </div>
+            {showConfirmAttendance && !attendanceConfirmed && (
+               <div className="relative w-full max-w-md rounded-[32px] border border-white/10 bg-slate-950/95 p-5 text-center shadow-2xl">
+                 <button
+                   onClick={() => {
+                     setShowConfirmAttendance(false);
+                     setAttendancePopupClosed(true);
+                   }}
+                   className="absolute top-4 right-4 rounded-full bg-white/5 p-2 text-xs text-slate-300 hover:bg-white/10"
+                   aria-label="Close attendance prompt"
+                 >
+                   ✕
+                 </button>
+                 <p className="text-[11px] uppercase tracking-[0.35em] text-white/40 mb-3">Confirm attendance on the board itself</p>
+                 <button onClick={() => { setAttendanceConfirmed(true); setShowConfirmAttendance(false); setPendingAttendanceCount(0); setShowAttendance(false); setAttendancePopupClosed(true); }} className="inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-sm font-bold uppercase tracking-[0.35em] text-emerald-200 hover:bg-emerald-500/15 transition">
+                   Confirm Attendance
+                 </button>
+               </div>
+            )}
+            {attendanceConfirmed && (
+               <div className="relative w-full max-w-md rounded-[32px] border border-emerald-500/30 bg-emerald-500/10 p-4 text-center text-emerald-200 shadow-2xl">
+                 <button
+                   onClick={() => {
+                     setAttendanceConfirmed(true);
+                     setShowConfirmAttendance(false);
+                     setShowAttendance(false);
+                     setAttendancePopupClosed(true);
+                   }}
+                   className="absolute top-4 right-4 rounded-full bg-white/5 p-2 text-xs text-slate-300 hover:bg-white/10"
+                   aria-label="Close attendance confirmed"
+                 >
+                   ✕
+                 </button>
+                 <span className="text-sm uppercase tracking-[0.35em]">Attendance confirmed</span>
+               </div>
+            )}
             {attendanceIndex >= 0 && attendanceIndex < students.length && (
                <div className="flex flex-col items-center gap-2 animate-fade-up">
                   <p className="text-[10px] uppercase tracking-[0.6em] text-white/20 font-black">Awaiting Response</p>
