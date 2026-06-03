@@ -1,18 +1,23 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { saveEnrollmentProfile } from "@/lib/firebase";
 
 interface FaceProfile {
   name: string;
   role: "student" | "teacher";
   descriptor: number[];
   enrolledAt: string;
+  studentClass?: string;
+  section?: string;
 }
 
 export default function FaceSetupPage() {
   const [profiles, setProfiles] = useState<FaceProfile[]>([]);
   const [name, setName] = useState("");
   const [role, setRole] = useState<"student" | "teacher">("student");
+  const [studentClass, setStudentClass] = useState("Grade 10");
+  const [studentSection, setStudentSection] = useState("A");
   const [status, setStatus] = useState("Loading camera & AI models...");
   const [isReady, setIsReady] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -135,6 +140,8 @@ export default function FaceSetupPage() {
       role,
       descriptor: capturedDescriptor,
       enrolledAt: new Date().toISOString(),
+      studentClass: role === "student" ? studentClass : undefined,
+      section: role === "student" ? studentSection : undefined,
     };
     const updated = [...profiles, newProfile];
     setProfiles(updated);
@@ -143,6 +150,10 @@ export default function FaceSetupPage() {
     setCapturedPreview(null);
     setCapturedDescriptor(null);
     setStatus(`✅ ${newProfile.name} enrolled as ${newProfile.role}! Next person, step up.`);
+
+    saveEnrollmentProfile(newProfile).catch(() => {
+      // Firebase fallback: still keep local enrollment even if remote save fails
+    });
   };
 
   const deleteProfile = (index: number) => {
@@ -226,6 +237,37 @@ export default function FaceSetupPage() {
                       🧑‍🏫 Teacher
                     </button>
                   </div>
+                  {role === "student" && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="flex flex-col text-xs text-slate-300 gap-2">
+                        Class
+                        <select
+                          value={studentClass}
+                          onChange={(e) => setStudentClass(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
+                        >
+                          <option>Grade 9</option>
+                          <option>Grade 10</option>
+                          <option>Grade 11</option>
+                          <option>Grade 12</option>
+                          <option>Senior Secondary</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col text-xs text-slate-300 gap-2">
+                        Section
+                        <select
+                          value={studentSection}
+                          onChange={(e) => setStudentSection(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white"
+                        >
+                          <option>A</option>
+                          <option>B</option>
+                          <option>C</option>
+                          <option>D</option>
+                        </select>
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
               <button
@@ -272,8 +314,8 @@ export default function FaceSetupPage() {
                     <div>
                       <p className="text-sm font-medium text-white">{p.name}</p>
                       <p className="text-[10px] text-slate-500">
-                        {p.role === "teacher" ? "🧑‍🏫 Teacher" : "🎒 Student"} ·{" "}
-                        {new Date(p.enrolledAt).toLocaleDateString()}
+                        {p.role === "teacher" ? "🧑‍🏫 Teacher" : `🎒 ${p.studentClass || "Student"} · Section ${p.section || "A"}`}{" "}
+                        · {new Date(p.enrolledAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>

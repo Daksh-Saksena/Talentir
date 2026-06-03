@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
+import { saveLiveClassSession } from "@/lib/firebase";
 
 // PhET simulation map
 const SIMS: Record<string, string> = {
@@ -44,6 +45,9 @@ export default function LiveClassPage() {
   const [attendanceConfirmed, setAttendanceConfirmed] = useState(false);
   const [attendancePopupClosed, setAttendancePopupClosed] = useState(false);
   const [mood, setMood] = useState("default");
+  const [teachingClass, setTeachingClass] = useState("Grade 10");
+  const [teachingSection, setTeachingSection] = useState("A");
+  const faceHistoryRef = useRef<number[]>([]);
   
   // NEW DASHBOARD STATES
   const [topic, setTopic] = useState("Ready to Start");
@@ -83,16 +87,43 @@ export default function LiveClassPage() {
     { name: "Ishaan", status: "pending" }, { name: "Kavya", status: "pending" }
   ]);
 
+  const buildRosterForClass = (klass: string, section: string) => {
+    if (typeof window === "undefined") return [];
+    const savedProfiles = JSON.parse(localStorage.getItem('cc-face-profiles') || '[]');
+    const studentProfiles = savedProfiles.filter((p: any) => {
+      return p.role === 'student' && p.studentClass === klass && p.section === section;
+    });
+    return studentProfiles.map((p: any) => ({ name: p.name, status: 'pending' as const }));
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const savedProfiles = JSON.parse(localStorage.getItem('cc-face-profiles') || '[]');
-    if (savedProfiles.length > 0) {
-      const studentProfiles = savedProfiles.filter((p: any) => p.role === 'student');
-      if (studentProfiles.length > 0) {
-        setStudents(studentProfiles.map((p: any) => ({ name: p.name, status: 'pending' as const })));
-      }
+    const roster = buildRosterForClass(teachingClass, teachingSection);
+    const resetAttendance = () => {
+      setAttendanceCount(0);
+      setDetectedFaceCount(0);
+      setFullAttendance(false);
+      setPendingAttendanceCount(0);
+      setAttendanceConfirmed(false);
+      setShowAttendance(false);
+      setShowConfirmAttendance(false);
+      setAttendancePopupClosed(false);
+    };
+
+    if (roster.length > 0) {
+      resetAttendance();
+      setStudents(roster);
+      return;
     }
-  }, []);
+
+    const enrolledStudents = savedProfiles.filter((p: any) => p.role === 'student');
+    if (enrolledStudents.length > 0) {
+      resetAttendance();
+      setStudents([]);
+      return;
+    }
+  }, [teachingClass, teachingSection]);
   
   const transcriptBuffer = useRef<string[]>([]);
   const wikiFetchController = useRef<AbortController | null>(null);
@@ -313,6 +344,8 @@ export default function LiveClassPage() {
             setFullAttendance(isFullAttendance);
             setDetectedFaceCount(count);
             detectedFaceCountRef.current = count;
+            faceHistoryRef.current.push(count);
+            if (faceHistoryRef.current.length > 60) faceHistoryRef.current.shift();
             setAutoAttendance(isFullAttendance);
             setShowAttendance(!attendanceConfirmed && !attendancePopupClosed && (count > 0 || attendanceIndex >= 0));
             if (count > 0) {
@@ -484,7 +517,7 @@ export default function LiveClassPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isListening, attendanceIndex]);
 
-  const toggleSession = () => {
+  const toggleSession = async () => {
     if (isListening) {
       // Auto-save class summary on stop
       if (topic !== "Ready to Start") {
@@ -496,6 +529,9 @@ export default function LiveClassPage() {
       const sessionData = {
         id: `sess_${Date.now()}`,
         date: new Date().toISOString(),
+        teachingClass,
+        teachingSection,
+        teacher: user?.name || 'Teacher',
         duration: Math.round((Date.now() - sessionStartRef.current) / 1000),
         topic,
         students: Object.entries(studentStatsRef.current).map(([name, s]) => ({
@@ -507,13 +543,24 @@ export default function LiveClassPage() {
           timeInClass: Math.round((s.lastSeen - s.firstSeen) / 1000),
           detections: s.attentionCount,
         })),
-        classAvgAttention: attention,
+        attendanceRoster: students.map((s) => ({ name: s.name, status: s.status })),
+        attendanceCount,
+        detectedFaceCount,
+        faceHistory: faceHistoryRef.current,
+        attention,
         engagement,
+        participation,
       };
       const sessions = JSON.parse(localStorage.getItem('cc-session-stats') || '[]');
       sessions.unshift(sessionData);
       localStorage.setItem('cc-session-stats', JSON.stringify(sessions));
       console.log('%c[Talantir] Session analytics saved', 'color: #6366f1;', sessionData);
+      try {
+        await saveLiveClassSession(sessionData);
+      } catch (error) {
+        console.warn('Firebase session save failed', error);
+      }
+      faceHistoryRef.current = [];
       // Reset
       studentStatsRef.current = {};
       setIsListening(false); stopEngines(); if (document.fullscreenElement) document.exitFullscreen();
@@ -729,6 +776,30 @@ export default function LiveClassPage() {
             <span className="text-sm font-bold tracking-widest text-indigo-400 uppercase drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">{topic}</span>
          </div>
       </div>
+      <div className="absolute top-[62px] inset-x-0 z-50 flex justify-center pointer-events-none">
+         <div className="px-4 py-3 bg-slate-950/90 border border-white/10 rounded-full shadow-2xl backdrop-blur-xl animate-fade-in flex items-center gap-4 text-white pointer-events-auto">
+            <div className="text-[10px] uppercase tracking-[0.45em] text-slate-400 font-black">Teaching</div>
+            <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.35em] text-slate-300">
+              Class
+              <select value={teachingClass} onChange={(e) => setTeachingClass(e.target.value)} className="rounded-full bg-slate-900 border border-slate-700 px-3 py-1 text-xs text-white outline-none">
+                <option>Grade 9</option>
+                <option>Grade 10</option>
+                <option>Grade 11</option>
+                <option>Grade 12</option>
+                <option>Senior Secondary</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-[10px] uppercase tracking-[0.35em] text-slate-300">
+              Section
+              <select value={teachingSection} onChange={(e) => setTeachingSection(e.target.value)} className="rounded-full bg-slate-900 border border-slate-700 px-3 py-1 text-xs text-white outline-none">
+                <option>A</option>
+                <option>B</option>
+                <option>C</option>
+                <option>D</option>
+              </select>
+            </label>
+         </div>
+      </div>
       {!attendancePopupClosed && (attendanceCount > 0 || detectedFaceCount > 0) && (
         <div className="absolute top-[74px] inset-x-0 z-50 flex justify-center pointer-events-none">
           <div className="relative px-6 py-3 bg-slate-950/95 border border-white/10 rounded-full shadow-2xl backdrop-blur-lg animate-fade-in">
@@ -795,7 +866,7 @@ export default function LiveClassPage() {
       </div>
 
       {/* Attendance Overlay */}
-      <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance || (pendingAttendanceCount > 0 && !attendanceConfirmed) ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
+      <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance || (!attendancePopupClosed && pendingAttendanceCount > 0 && !attendanceConfirmed) ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
          <div className="bg-white/5 backdrop-blur-3xl border-b border-white/10 w-full p-10 flex flex-col items-center justify-center gap-10">
             <div className="flex flex-wrap gap-4 justify-center max-w-5xl">
                 {students.map((s, i) => (
