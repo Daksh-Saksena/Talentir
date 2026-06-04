@@ -344,38 +344,33 @@ export default function LiveClassPage() {
             setFullAttendance(isFullAttendance);
             setDetectedFaceCount(count);
             detectedFaceCountRef.current = count;
+            console.log("[FACE DEBUG]", {
+            count,
+            ref: detectedFaceCountRef.current,
+            showConfirmAttendance,
+            attendanceConfirmed,
+            });
             faceHistoryRef.current.push(count);
             if (faceHistoryRef.current.length > 60) faceHistoryRef.current.shift();
             setAutoAttendance(isFullAttendance);
-            setShowAttendance(!attendanceConfirmed && !attendancePopupClosed && (count > 0 || attendanceIndex >= 0));
-            if (count > 0) {
-              setPendingAttendanceCount(count);
-              if (isFullAttendance) {
-                setAttendanceConfirmed(true);
-                setShowConfirmAttendance(false);
-                setShowAttendance(false);
-                setAttendancePopupClosed(true);
-              } else if (!attendancePopupClosed && !attendanceConfirmed) {
-                setShowConfirmAttendance(true);
+            if (!attendanceConfirmed && showConfirmAttendance) {
+              if (count > 0) {
+                setPendingAttendanceCount(count);
+                setStudents(prev => {
+                  const updated = prev.map((s) => recognizedStudentNames.has(s.name.toLowerCase()) ? { ...s, status: 'present' as const } : s);
+                  return updated;
+                });
+                setAttendanceCount(presentCount);
               }
-              setStudents(prev => {
-                const updated = prev.map((s) => recognizedStudentNames.has(s.name.toLowerCase()) ? { ...s, status: 'present' as const } : s);
-                return updated;
-              });
-              setAttendanceCount(presentCount);
-            } else {
+            }
+            if (attendanceConfirmed) {
+              console.log("[Attendance] Resetting counters after confirmation");
+
               setAttendanceCount(0);
               setDetectedFaceCount(0);
               detectedFaceCountRef.current = 0;
-              if (!attendanceConfirmed) {
-                setAttendancePopupClosed(false);
-              }
-              if (attendanceConfirmed) {
-                setShowConfirmAttendance(false);
-                setPendingAttendanceCount(0);
-                setShowAttendance(false);
-              }
             }
+
 
             // Update attention & engagement
             setAttention(Math.round((totalAttention / count) * 100));
@@ -435,18 +430,48 @@ export default function LiveClassPage() {
 
     const isAttendanceCommand = cleaned.includes("ai take attendance") || cleaned.includes("ai take attendence") || cleaned.includes("take attendance") || cleaned.includes("attendance check");
     if (isAttendanceCommand) {
-      const currentFaceCount = detectedFaceCountRef.current || detectedFaceCount;
-      if (fullAttendance) {
-        setAttendanceConfirmed(true);
-        setShowConfirmAttendance(false);
-      } else if (currentFaceCount > 0) {
+      const currentFaceCount = Math.max(detectedFaceCountRef.current, detectedFaceCount);
+      console.log("[Attendance] Voice command triggered. Face count:", { ref: detectedFaceCountRef.current, state: detectedFaceCount, current: currentFaceCount });
+      if (currentFaceCount > 0) {
         setAttendancePopupClosed(false);
         setShowAttendance(true);
         setShowConfirmAttendance(true);
+
         setPendingAttendanceCount(currentFaceCount);
-      } else {
+        setAttendanceCount(currentFaceCount); // <-- add this
+
+        console.log("[Attendance Debug]", {
+          currentFaceCount,
+          pending: currentFaceCount,
+        });
+
+        speak(`I found ${currentFaceCount} student${currentFaceCount === 1 ? '' : 's'}. Confirm attendance?`);
+      }else {
+        console.warn("[Attendance] No faces detected. Camera may not be running or no faces visible.");
         speak("I can't see any faces yet. Please make sure students are visible to the camera.");
       }
+      return;
+    }
+
+    const confirmAttendanceCmd = (cleaned.includes("confirm") && cleaned.includes("attendance")) || cleaned.includes("yes confirm") || cleaned.includes("confirm");
+    if (confirmAttendanceCmd && showConfirmAttendance && !attendanceConfirmed) {
+      setAttendanceConfirmed(true);
+      setShowConfirmAttendance(false);
+      setPendingAttendanceCount(0);
+      setShowAttendance(false);
+      setAttendancePopupClosed(true);
+      speak("Attendance confirmed.");
+      return;
+    }
+
+    const denyAttendanceCmd = cleaned.includes("deny") || cleaned.includes("skip") || cleaned.includes("cancel attendance");
+    if (denyAttendanceCmd && showConfirmAttendance && !attendanceConfirmed) {
+      setShowConfirmAttendance(false);
+      setShowAttendance(false);
+      setAttendancePopupClosed(true);
+      setPendingAttendanceCount(0);
+      setAttendanceConfirmed(false);
+      speak("Attendance cancelled.");
       return;
     }
 
@@ -800,37 +825,7 @@ export default function LiveClassPage() {
             </label>
          </div>
       </div>
-      {!attendancePopupClosed && (attendanceCount > 0 || detectedFaceCount > 0) && (
-        <div className="absolute top-[74px] inset-x-0 z-50 flex justify-center pointer-events-none">
-          <div className="relative px-6 py-3 bg-slate-950/95 border border-white/10 rounded-full shadow-2xl backdrop-blur-lg animate-fade-in">
-            <button
-              onClick={() => {
-                setAttendancePopupClosed(true);
-                setShowAttendance(false);
-                setShowConfirmAttendance(false);
-              }}
-              className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-xs text-slate-300 hover:bg-white/10 pointer-events-auto"
-              aria-label="Close attendance summary"
-            >
-              ✕
-            </button>
-            <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">Attendance</div>
-            <div className="text-sm font-black uppercase tracking-[0.2em] text-white">
-              {attendanceCount > 0 ? `${attendanceCount} / ${students.length} present` : `${detectedFaceCount} face${detectedFaceCount === 1 ? '' : 's'} detected`}
-            </div>
-            {fullAttendance && (
-              <div className="mt-1 inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-emerald-300 border border-emerald-500/30">
-                FULL ATTENDANCE
-              </div>
-            )}
-            {!fullAttendance && detectedFaceCount > 0 && !showConfirmAttendance && !attendanceConfirmed && (
-              <div className="mt-1 text-[10px] uppercase tracking-[0.25em] text-slate-400">
-                Say "AI take attendance" to count faces and confirm attendance.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+
 
       {/* LEFT SUMMARY PANEL */}
       <div className="absolute left-6 top-1/2 -translate-y-1/2 w-72 z-50 pointer-events-none flex flex-col gap-4">
@@ -866,7 +861,7 @@ export default function LiveClassPage() {
       </div>
 
       {/* Attendance Overlay */}
-      <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance || (!attendancePopupClosed && pendingAttendanceCount > 0 && !attendanceConfirmed) ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
+      <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
          <div className="bg-white/5 backdrop-blur-3xl border-b border-white/10 w-full p-10 flex flex-col items-center justify-center gap-10">
             <div className="flex flex-wrap gap-4 justify-center max-w-5xl">
                 {students.map((s, i) => (
@@ -896,10 +891,11 @@ export default function LiveClassPage() {
                )}
             </div>
             {showConfirmAttendance && !attendanceConfirmed && (
-               <div className="relative w-full max-w-md rounded-[32px] border border-white/10 bg-slate-950/95 p-5 text-center shadow-2xl">
+               <div className="relative w-full max-w-md rounded-[32px] border border-white/10 bg-slate-950/95 p-6 text-center shadow-2xl">
                  <button
                    onClick={() => {
                      setShowConfirmAttendance(false);
+                     setShowAttendance(false);
                      setAttendancePopupClosed(true);
                    }}
                    className="absolute top-4 right-4 rounded-full bg-white/5 p-2 text-xs text-slate-300 hover:bg-white/10"
@@ -907,27 +903,32 @@ export default function LiveClassPage() {
                  >
                    ✕
                  </button>
-                 <p className="text-[11px] uppercase tracking-[0.35em] text-white/40 mb-3">Confirm attendance on the board itself</p>
-                 <button onClick={() => { setAttendanceConfirmed(true); setShowConfirmAttendance(false); setPendingAttendanceCount(0); setShowAttendance(false); setAttendancePopupClosed(true); }} className="inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-5 py-3 text-sm font-bold uppercase tracking-[0.35em] text-emerald-200 hover:bg-emerald-500/15 transition">
-                   Confirm Attendance
-                 </button>
-               </div>
-            )}
-            {attendanceConfirmed && (
-               <div className="relative w-full max-w-md rounded-[32px] border border-emerald-500/30 bg-emerald-500/10 p-4 text-center text-emerald-200 shadow-2xl">
-                 <button
-                   onClick={() => {
-                     setAttendanceConfirmed(true);
-                     setShowConfirmAttendance(false);
-                     setShowAttendance(false);
-                     setAttendancePopupClosed(true);
-                   }}
-                   className="absolute top-4 right-4 rounded-full bg-white/5 p-2 text-xs text-slate-300 hover:bg-white/10"
-                   aria-label="Close attendance confirmed"
-                 >
-                   ✕
-                 </button>
-                 <span className="text-sm uppercase tracking-[0.35em]">Attendance confirmed</span>
+                 <p className="text-sm uppercase tracking-[0.35em] text-white/60 mb-4 font-bold">Confirm Attendance?</p>
+                 <div className="flex gap-3 justify-center">
+                   <button
+                     onClick={() => {
+                       setAttendanceConfirmed(true);
+                       setShowConfirmAttendance(false);
+                       setPendingAttendanceCount(0);
+                       setShowAttendance(false);
+                       setAttendancePopupClosed(true);
+                     }}
+                     className="inline-flex items-center justify-center rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-6 py-3 text-sm font-bold uppercase tracking-[0.35em] text-emerald-200 hover:bg-emerald-500/15 transition"
+                   >
+                     ✓ Confirm
+                   </button>
+                   <button
+                     onClick={() => {
+                       setShowConfirmAttendance(false);
+                       setShowAttendance(false);
+                       setAttendancePopupClosed(true);
+                       setPendingAttendanceCount(0);
+                     }}
+                     className="inline-flex items-center justify-center rounded-2xl border border-red-400/40 bg-red-500/10 px-6 py-3 text-sm font-bold uppercase tracking-[0.35em] text-red-200 hover:bg-red-500/15 transition"
+                   >
+                     ✗ Deny
+                   </button>
+                 </div>
                </div>
             )}
             {attendanceIndex >= 0 && attendanceIndex < students.length && (

@@ -99,6 +99,11 @@ const logFirestorePermissionError = (error: any, context: string) => {
 export const saveLiveClassSession = async (session: any) => {
   try {
     const db = await getFirestore();
+    console.log("[Firebase] Saving session with engagement data:", {
+      engagement: session.engagement,
+      attention: session.attention,
+      participantCount: Object.keys(session.participation || {}).length,
+    });
     return await db.collection("liveClassSessions").add(session);
   } catch (error: any) {
     logFirestorePermissionError(error, "session save");
