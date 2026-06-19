@@ -5,16 +5,19 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 
 const studentLinks = [
+  { href: "/textbook", label: "Textbooks", icon: "📚" },
   { href: "/analytics", label: "Analytics", icon: "📈" },
 ];
 
 const teacherLinks = [
+  { href: "/textbook", label: "Textbooks", icon: "📚" },
   { href: "/face-setup", label: "Enrollment", icon: "📷" },
   { href: "/live-class", label: "IP Panel", icon: "📺" },
   { href: "/analytics", label: "Analytics", icon: "📈" },
 ];
 
 const adminLinks = [
+  { href: "/textbook", label: "Textbooks", icon: "📚" },
   { href: "/face-setup", label: "Enrollment", icon: "📷" },
   { href: "/live-class", label: "IP Panel", icon: "📺" },
   { href: "/analytics", label: "Analytics", icon: "📈" },

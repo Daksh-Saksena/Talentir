@@ -7,6 +7,7 @@ export default function DashboardPage() {
   const { user } = useAuth();
 
   const actions = [
+    { href: "/textbook", icon: "📚", label: "Textbooks" },
     { href: "/face-setup", icon: "📷", label: "Enrollment" },
     { href: "/live-class", icon: "📺", label: "IP Panel" },
     { href: "/analytics", icon: "📈", label: "Analytics" },
@@ -40,6 +41,7 @@ export default function DashboardPage() {
               <div>
                 <h2 className="text-2xl font-semibold text-white">{action.label}</h2>
                 <p className="mt-3 text-sm text-slate-400">
+                  {action.label === "Textbooks" && "Open any NCERT textbook with voice commands. Includes board questions and key section highlights."}
                   {action.label === "Enrollment" && "Manage face profiles and enroll students for live attendance."}
                   {action.label === "IP Panel" && "Open the live classroom dashboard and start attendance monitoring."}
                   {action.label === "Analytics" && "Review class metrics, performance trends, and session reports."}
