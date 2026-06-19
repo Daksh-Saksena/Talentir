@@ -1,17 +1,5 @@
 "use client";
 
-/**
- * Textbook Reader Page — /textbook
- * ────────────────────────────────
- * Features:
- *  1. Voice command "pull up <book>" → opens the NCERT PDF
- *  2. PDF rendered in a sandboxed iframe (NCERT direct + Google Docs fallback)
- *  3. Auto-scroll proxy: voice transcript + scroll events used to infer
- *     current chapter/section → sent to BoardQuestionsPanel
- *  4. Important sections underlined via AI annotation panel
- *  5. Board / sample questions side panel
- */
-
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import TextbookVoiceListener, { type VoiceCommand } from "@/components/TextbookVoiceListener";
@@ -27,15 +15,15 @@ interface ImportantSection {
   keywords: string[];
 }
 
-// ── Fetch important sections from GPT ────────────────────────────────────────
+// PDF rendering has 3 stages tried in order:
+//   1. proxy  — /api/pdf-proxy (server fetches → our origin → no X-Frame-Options issue)
+//   2. object — <object> pointing direct to NCERT (browsers sometimes allow even if iframe blocked)
+//   3. failed — show "open in new tab" button
+type PdfStage = "proxy" | "object" | "failed";
+
+// ── GPT helpers ───────────────────────────────────────────────────────────────
 async function fetchImportantSections(book: TextbookEntry): Promise<ImportantSection[]> {
-  const isBoardClass = book.hasBoardPapers;
-  const prompt = `List the 8 most important sections/chapters of the NCERT ${book.subject} textbook for Class ${book.grade} (${book.title}).
-For each, give: title, 1-sentence reason why it's important for ${isBoardClass ? "board exams" : "school exams"}, and 3–5 keyword search terms.
-
-Return ONLY a JSON array (no markdown):
-[{"title":"...","reason":"...","keywords":["...","..."]}]`;
-
+  if (!OPENAI_KEY) return [];
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -44,38 +32,48 @@ Return ONLY a JSON array (no markdown):
         model: "gpt-4o-mini",
         messages: [
           { role: "system", content: "Output only valid JSON arrays, no markdown fences." },
-          { role: "user", content: prompt },
+          {
+            role: "user",
+            content: `List the 8 most important sections/chapters of the NCERT ${book.subject} textbook for Class ${book.grade}.
+For each give: title, 1-sentence reason it is important for ${book.hasBoardPapers ? "board exams" : "school exams"}, and 3–5 keyword search terms.
+Return ONLY a JSON array: [{"title":"...","reason":"...","keywords":["..."]}]`,
+          },
         ],
         temperature: 0.5,
         max_tokens: 900,
       }),
     });
     const data = await res.json();
-    const raw = data.choices[0].message.content.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-    const parsed: Omit<ImportantSection, "id">[] = JSON.parse(raw);
+    const raw = data.choices[0].message.content
+      .trim()
+      .replace(/^```(?:json)?[\r\n]*/i, "")
+      .replace(/[\r\n]*```$/i, "")
+      .trim();
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
+    const parsed: Omit<ImportantSection, "id">[] = JSON.parse(raw.slice(start, end + 1));
     return parsed.map((s, i) => ({ ...s, id: `sec-${i}` }));
   } catch {
     return [];
   }
 }
 
-// ── Infer current section from voice transcript ───────────────────────────────
 async function inferSection(transcript: string, book: TextbookEntry): Promise<string> {
-  if (!transcript.trim() || !book) return "";
-  const prompt = `The student said: "${transcript}". 
-They are reading "${book.title}" (Class ${book.grade} ${book.subject}).
-What chapter or section are they likely reading about? Reply with ONLY the section/chapter name (4 words max). 
-If unclear, reply with the most relevant topic from this book.`;
-
+  if (!transcript.trim() || !OPENAI_KEY) return "";
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "user",
+            content: `The student just said: "${transcript}". They are reading "${book.title}" (Class ${book.grade} ${book.subject}). What chapter or section are they likely on? Reply with ONLY the chapter/section name, 4 words max.`,
+          },
+        ],
         temperature: 0.3,
-        max_tokens: 30,
+        max_tokens: 20,
       }),
     });
     const data = await res.json();
@@ -87,11 +85,10 @@ If unclear, reply with the most relevant topic from this book.`;
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function TextbookPage() {
-  const { user } = useAuth();
+  useAuth(); // ensure auth context is consumed
 
   const [activeBook, setActiveBook] = useState<TextbookEntry | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string>("");
-  const [pdfLoadError, setPdfLoadError] = useState(false);
+  const [pdfStage, setPdfStage] = useState<PdfStage>("proxy");
   const [currentSection, setCurrentSection] = useState("");
   const [importantSections, setImportantSections] = useState<ImportantSection[]>([]);
   const [loadingAnnotations, setLoadingAnnotations] = useState(false);
@@ -100,34 +97,28 @@ export default function TextbookPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TextbookEntry[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
-
   const sectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Notification helper ────────────────────────────────────────────────────
   const notify = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3500);
   };
 
-  // ── Open a textbook ────────────────────────────────────────────────────────
+  // ── Open a textbook ──────────────────────────────────────────────────────
   const openBook = useCallback(async (book: TextbookEntry) => {
     setActiveBook(book);
-    setPdfLoadError(false);
+    setPdfStage("proxy");
     setCurrentSection("");
     setImportantSections([]);
-    // Route through our own API proxy — avoids NCERT's X-Frame-Options block
-    const proxyUrl = `/api/pdf-proxy?url=${encodeURIComponent(book.pdfUrl)}`;
-    setPdfUrl(proxyUrl);
     notify(`📖 Opening: ${book.title}`);
 
-    // Load important sections in background
     setLoadingAnnotations(true);
     const sections = await fetchImportantSections(book);
     setImportantSections(sections);
     setLoadingAnnotations(false);
   }, []);
 
-  // ── Handle voice command ───────────────────────────────────────────────────
+  // ── Voice command handler ────────────────────────────────────────────────
   const handleVoiceCommand = useCallback(
     (cmd: VoiceCommand) => {
       if (cmd.type === "open_book") {
@@ -135,14 +126,14 @@ export default function TextbookPage() {
         if (book) {
           openBook(book);
         } else {
-          notify(`❓ Couldn't find a book matching "${cmd.query}". Try being more specific.`);
+          notify(`❓ No match for "${cmd.query}". Try "Class 10 Science" or "Class 12 Physics".`);
         }
       }
     },
     [openBook]
   );
 
-  // ── Handle voice transcript for section inference ──────────────────────────
+  // ── Voice transcript → section inference ────────────────────────────────
   const handleTranscript = useCallback(
     (text: string) => {
       if (!activeBook) return;
@@ -155,13 +146,10 @@ export default function TextbookPage() {
     [activeBook]
   );
 
-  // ── Search textbooks ───────────────────────────────────────────────────────
+  // ── Search ───────────────────────────────────────────────────────────────
   const handleSearch = (q: string) => {
     setSearchQuery(q);
-    if (!q.trim()) {
-      setSearchResults([]);
-      return;
-    }
+    if (!q.trim()) { setSearchResults([]); return; }
     const ql = q.toLowerCase();
     setSearchResults(
       TEXTBOOKS.filter(
@@ -174,34 +162,34 @@ export default function TextbookPage() {
     );
   };
 
-  // Cleanup
   useEffect(() => () => {
     if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
   }, []);
 
   const gradeGroups = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
+  // Build the right URL for the current stage
+  const proxyUrl = activeBook
+    ? `/api/pdf-proxy?url=${encodeURIComponent(activeBook.pdfUrl)}`
+    : "";
+
   return (
-    <div className="flex h-[calc(100vh-80px)] overflow-hidden gap-0 relative">
-      {/* ── Toast notification ── */}
+    <div className="flex h-[calc(100vh-80px)] overflow-hidden relative">
+      {/* Toast */}
       {notification && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 text-white text-sm font-semibold px-6 py-3 rounded-2xl shadow-2xl border border-indigo-400/30 animate-fade-in">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 text-white text-sm font-semibold px-6 py-3 rounded-2xl shadow-2xl border border-indigo-400/30 animate-fade-in pointer-events-none">
           {notification}
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════
-          LEFT PANEL — Library browser + Annotations
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* ══ LEFT — Library ══ */}
       <aside className="w-72 shrink-0 flex flex-col border-r border-slate-800 bg-slate-950 overflow-hidden">
-        {/* Toolbar */}
         <div className="p-4 border-b border-slate-800 space-y-3">
           <div className="flex items-center gap-2">
             <span className="text-lg">📚</span>
             <h2 className="text-sm font-bold text-white">NCERT Textbooks</h2>
           </div>
 
-          {/* Voice listener widget */}
           <TextbookVoiceListener
             onCommand={handleVoiceCommand}
             onTranscript={handleTranscript}
@@ -216,21 +204,21 @@ export default function TextbookPage() {
                 : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
             }`}
           >
-            {voiceActive ? "🎙️ Voice Commands Active" : "🎙️ Enable Voice Commands"}
+            {voiceActive ? "🎙️ Voice Active — click to stop" : "🎙️ Enable Voice Commands"}
           </button>
 
-          {/* Search */}
+          {/* Search box */}
           <div className="relative">
             <input
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               onFocus={() => setShowSearch(true)}
-              onBlur={() => setTimeout(() => setShowSearch(false), 200)}
-              placeholder='Search e.g. "Class 10 Physics"'
+              onBlur={() => setTimeout(() => setShowSearch(false), 150)}
+              placeholder='Search: "Class 10 Physics"'
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/50"
             />
             {showSearch && searchResults.length > 0 && (
-              <div className="absolute top-full mt-1 left-0 right-0 z-20 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
+              <div className="absolute top-full mt-1 left-0 right-0 z-30 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl max-h-52 overflow-y-auto">
                 {searchResults.map((b) => (
                   <button
                     key={b.pdfUrl}
@@ -246,8 +234,8 @@ export default function TextbookPage() {
           </div>
         </div>
 
-        {/* Grade browser */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        {/* Grade accordion */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-0.5">
           {gradeGroups.map((grade) => {
             const books = TEXTBOOKS.filter((b) => b.grade === grade);
             if (!books.length) return null;
@@ -263,55 +251,55 @@ export default function TextbookPage() {
           })}
         </div>
 
-        {/* Important Sections */}
+        {/* Key Sections */}
         {activeBook && (
-          <div className="border-t border-slate-800 p-4 shrink-0 max-h-56 overflow-y-auto">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs font-bold text-amber-400 uppercase tracking-wide">⭐ Key Sections</span>
-              {loadingAnnotations && <span className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />}
+          <div className="border-t border-slate-800 p-3 shrink-0 max-h-60 overflow-y-auto">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wide">⭐ Key Sections</span>
+              {loadingAnnotations && (
+                <span className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />
+              )}
             </div>
             {importantSections.length === 0 && !loadingAnnotations && (
-              <p className="text-xs text-slate-600">No annotations yet</p>
+              <p className="text-[11px] text-slate-600">Loading…</p>
             )}
-            <ul className="space-y-2">
-              {importantSections.map((sec) => (
-                <li key={sec.id}>
-                  <button
-                    onClick={() => setCurrentSection(sec.title)}
-                    className={`w-full text-left group rounded-xl p-2 border transition ${
-                      currentSection === sec.title
-                        ? "border-amber-500/30 bg-amber-500/10"
-                        : "border-transparent hover:border-slate-700 hover:bg-slate-800/50"
-                    }`}
-                  >
-                    {/* Underline styling mimics textbook highlight */}
-                    <span
-                      className={`block text-xs font-semibold leading-snug ${
-                        currentSection === sec.title ? "text-amber-300" : "text-slate-300"
-                      } underline decoration-amber-400/50 decoration-wavy underline-offset-2`}
+            <ul className="space-y-1">
+              {importantSections.map((sec) => {
+                const active = currentSection === sec.title;
+                return (
+                  <li key={sec.id}>
+                    <button
+                      onClick={() => setCurrentSection(sec.title)}
+                      className={`w-full text-left rounded-xl px-2 py-1.5 border transition ${
+                        active
+                          ? "border-amber-500/30 bg-amber-500/10"
+                          : "border-transparent hover:border-slate-700 hover:bg-slate-800/60"
+                      }`}
                     >
-                      {sec.title}
-                    </span>
-                    <span className="block text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                      {sec.reason}
-                    </span>
-                  </button>
-                </li>
-              ))}
+                      <span
+                        className={`block text-[11px] font-semibold leading-snug underline decoration-wavy underline-offset-2 ${
+                          active ? "text-amber-300 decoration-amber-400/60" : "text-slate-300 decoration-slate-600"
+                        }`}
+                      >
+                        {sec.title}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug">{sec.reason}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
       </aside>
 
-      {/* ════════════════════════════════════════════════════════════════════
-          CENTRE — PDF Viewer
-      ════════════════════════════════════════════════════════════════════ */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-slate-950 relative min-w-0">
-        {/* Book header */}
+      {/* ══ CENTRE — PDF viewer ══ */}
+      <main className="flex-1 flex flex-col overflow-hidden bg-slate-950 min-w-0">
+        {/* Book header bar */}
         {activeBook && (
-          <div className="shrink-0 px-4 py-2 border-b border-slate-800 flex items-center gap-3 bg-slate-900/60">
+          <div className="shrink-0 px-4 py-2 border-b border-slate-800 bg-slate-900/60 flex items-center gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">
+              <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-widest">
                 Class {activeBook.grade} · {activeBook.subject}
               </p>
               <h2 className="text-sm font-semibold text-white truncate">{activeBook.title}</h2>
@@ -322,45 +310,64 @@ export default function TextbookPage() {
               </span>
             )}
             {currentSection && (
-              <span className="shrink-0 max-w-[140px] truncate px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-[10px] font-bold border border-indigo-500/20">
+              <span className="shrink-0 max-w-[160px] truncate px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-[10px] font-bold border border-indigo-500/20">
                 📍 {currentSection}
+              </span>
+            )}
+            {/* Stage indicator */}
+            {pdfStage === "object" && (
+              <span className="shrink-0 text-[10px] text-amber-400 border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                fallback mode
               </span>
             )}
             <a
               href={activeBook.pdfUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="shrink-0 text-xs text-slate-500 hover:text-white transition px-2 py-1 rounded-lg hover:bg-slate-800"
-              title="Open PDF directly"
+              className="shrink-0 text-xs text-slate-500 hover:text-white transition px-2 py-1 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700"
             >
-              ↗ Direct PDF
+              ↗ Open directly
             </a>
           </div>
         )}
 
-        {/* PDF Frame or placeholder */}
+        {/* PDF content area */}
         {!activeBook ? (
           <EmptyState onVoice={() => setVoiceActive(true)} />
-        ) : pdfLoadError ? (
-          <PDFError book={activeBook} onRetry={() => {
-            setPdfLoadError(false);
-            setPdfUrl(`/api/pdf-proxy?url=${encodeURIComponent(activeBook.pdfUrl)}&t=${Date.now()}`);
-          }} />
-        ) : (
+        ) : pdfStage === "proxy" ? (
           <iframe
-            key={pdfUrl}
-            src={pdfUrl}
-            className="flex-1 w-full border-0 h-full"
+            key={`proxy-${activeBook.pdfUrl}`}
+            src={proxyUrl}
+            className="flex-1 w-full border-0"
+            style={{ height: "100%" }}
             title={activeBook.title}
-            onError={() => setPdfLoadError(true)}
             allow="fullscreen"
+            onError={() => {
+              console.warn("[textbook] proxy iframe failed, trying <object>");
+              setPdfStage("object");
+            }}
           />
+        ) : pdfStage === "object" ? (
+          <object
+            key={`object-${activeBook.pdfUrl}`}
+            data={activeBook.pdfUrl}
+            type="application/pdf"
+            className="flex-1 w-full"
+            style={{ height: "100%" }}
+            onError={() => {
+              console.warn("[textbook] <object> also failed");
+              setPdfStage("failed");
+            }}
+          >
+            {/* Fallback if object tag not supported */}
+            <PDFFailed book={activeBook} onRetry={() => setPdfStage("proxy")} />
+          </object>
+        ) : (
+          <PDFFailed book={activeBook} onRetry={() => setPdfStage("proxy")} />
         )}
       </main>
 
-      {/* ════════════════════════════════════════════════════════════════════
-          RIGHT PANEL — Board Questions
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* ══ RIGHT — Board Questions ══ */}
       <aside className="w-80 shrink-0 border-l border-slate-800 bg-slate-950 overflow-hidden">
         <BoardQuestionsPanel book={activeBook} currentSection={currentSection} />
       </aside>
@@ -368,13 +375,9 @@ export default function TextbookPage() {
   );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
+// ── Grade accordion ───────────────────────────────────────────────────────────
 function GradeAccordion({
-  grade,
-  books,
-  activeBook,
-  onOpen,
+  grade, books, activeBook, onOpen,
 }: {
   grade: number;
   books: TextbookEntry[];
@@ -396,10 +399,18 @@ function GradeAccordion({
         }`}
       >
         <span>Class {grade}</span>
-        <span className={`transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" clipRule="evenodd" />
+        </svg>
       </button>
+
       {open && (
-        <div className="ml-2 mt-1 space-y-0.5">
+        <div className="ml-2 mt-0.5 space-y-0.5">
           {books.map((b) => {
             const isActive = activeBook?.pdfUrl === b.pdfUrl;
             return (
@@ -409,13 +420,13 @@ function GradeAccordion({
                 className={`w-full text-left px-3 py-2 rounded-lg text-xs transition flex items-center gap-2 ${
                   isActive
                     ? "bg-indigo-500/15 text-indigo-300 border border-indigo-500/20"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent"
                 }`}
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0 opacity-60" />
-                <span className="truncate">{b.subject}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0 opacity-50" />
+                <span className="truncate flex-1">{b.subject}</span>
                 {b.hasBoardPapers && (
-                  <span className="ml-auto shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20">
                     Board
                   </span>
                 )}
@@ -428,6 +439,7 @@ function GradeAccordion({
   );
 }
 
+// ── Empty state ───────────────────────────────────────────────────────────────
 function EmptyState({ onVoice }: { onVoice: () => void }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
@@ -437,19 +449,15 @@ function EmptyState({ onVoice }: { onVoice: () => void }) {
       <div>
         <h3 className="text-xl font-bold text-white mb-2">Open a Textbook</h3>
         <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
-          Browse the library on the left, search by class/subject, or use voice commands.
+          Pick a class from the left sidebar, use the search bar, or try voice commands.
         </p>
       </div>
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl px-6 py-4 text-left max-w-sm w-full">
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Try saying:</p>
-        {[
-          '"Pull up Class 10 Science"',
-          '"Open Class 12 Physics"',
-          '"Show me Class 9 Maths"',
-          '"Bring up Class 6 English"',
-        ].map((ex) => (
-          <p key={ex} className="text-sm text-slate-300 mb-1.5 flex items-center gap-2">
-            <span className="text-indigo-400">🎙️</span> {ex}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl px-6 py-4 text-left max-w-sm w-full space-y-2">
+        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Voice examples:</p>
+        {["Pull up Class 10 Science", "Open Class 12 Physics", "Show Class 9 Maths", "Load Class 6 English"].map((ex) => (
+          <p key={ex} className="text-sm text-slate-300 flex items-center gap-2">
+            <span className="text-indigo-400 text-base">🎙</span>
+            <span>"{ex}"</span>
           </p>
         ))}
       </div>
@@ -463,18 +471,20 @@ function EmptyState({ onVoice }: { onVoice: () => void }) {
   );
 }
 
-function PDFError({ book, onRetry }: { book: TextbookEntry; onRetry: () => void }) {
+// ── PDF failed state ──────────────────────────────────────────────────────────
+function PDFFailed({ book, onRetry }: { book: TextbookEntry; onRetry: () => void }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
-      <div className="text-4xl">⚠️</div>
-      <h3 className="text-base font-bold text-white">PDF couldn't be embedded</h3>
-      <p className="text-sm text-slate-400 max-w-xs">
-        The NCERT server may be blocking embedding. You can still open it directly.
+      <div className="text-5xl">📄</div>
+      <h3 className="text-base font-bold text-white">Couldn't display the PDF inline</h3>
+      <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
+        NCERT's server is blocking the embed. The PDF is available — open it directly in a new tab
+        where you can read it with full browser controls.
       </p>
       <div className="flex gap-3 flex-wrap justify-center">
         <button
           onClick={onRetry}
-          className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold rounded-xl transition"
+          className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-sm font-semibold rounded-xl transition"
         >
           ↻ Retry
         </button>
@@ -482,11 +492,14 @@ function PDFError({ book, onRetry }: { book: TextbookEntry; onRetry: () => void 
           href={book.pdfUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition"
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition shadow-md shadow-indigo-500/20"
         >
-          ↗ Open PDF Directly
+          ↗ Open PDF in New Tab
         </a>
       </div>
+      <p className="text-[11px] text-slate-600 max-w-xs">
+        Tip: Board questions and key sections on the right still work regardless of whether the PDF loads inline.
+      </p>
     </div>
   );
 }
