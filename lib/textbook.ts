@@ -30,9 +30,10 @@ export interface TextbookEntry {
   /** Voice command aliases */
   aliases: string[];
   /**
-   * The default PDF URL to display when the book is opened.
-   * - For grades 9-12: chapter 1 PDF via our proxy
-   * - For grades 1-8: NCERT HTML viewer URL
+   * The raw URL to display when the book is opened.
+   * - For grades 9-12: the chapter 1 PDF URL on ncert.nic.in (RAW, not proxy-wrapped)
+   * - For grades 1-8: the NCERT HTML viewer URL
+   * The page.tsx wraps raw PDF URLs in the proxy automatically.
    */
   pdfUrl: string;
 }
@@ -51,15 +52,28 @@ export function ncertViewerUrl(code: string, maxChapter: number): string {
 }
 
 /**
- * Returns the "open" URL for a textbook entry.
- * For grades 9-12: the chapter 1 PDF served through our proxy.
- * For grades 1-8: the NCERT HTML viewer page.
+ * Returns the raw "open" URL for a textbook entry.
+ * For grades 9-12: the chapter 1 PDF URL on NCERT (RAW — NOT proxy-wrapped).
+ *   The page.tsx wraps it in the proxy via encodeURIComponent().
+ * For grades 1-8: the NCERT HTML viewer page (no proxy needed).
  */
 export function getBookPdfUrl(book: TextbookEntry): string {
   if (book.hasPdf) {
-    return `/api/pdf-proxy?url=${encodeURIComponent(chapterPdfUrl(book.code, 1))}`;
+    return chapterPdfUrl(book.code, 1);
   }
   return ncertViewerUrl(book.code, book.chapters);
+}
+
+/**
+ * Returns the proxy-wrapped URL for displaying a PDF inline.
+ * This is what the iframe/src uses.
+ */
+export function getBookProxyUrl(book: TextbookEntry): string {
+  const raw = getBookPdfUrl(book);
+  if (book.hasPdf) {
+    return `/api/pdf-proxy?url=${encodeURIComponent(raw)}`;
+  }
+  return raw; // grades 1-8 go direct to NCERT viewer (not a PDF)
 }
 
 // ── Textbook registry ─────────────────────────────────────────────────────────
@@ -166,6 +180,49 @@ export const TEXTBOOKS: TextbookEntry[] = [
   makeEntry(11, "Maths",          "Mathematics – Class 11",       "kemh1",  true, 14, false, ["class 11 maths","grade 11 maths","eleventh maths","class 11 mathematics"]),
   makeEntry(11, "Biology",        "Biology – Class 11",           "kebo1",  true, 19, false, ["class 11 biology","grade 11 biology","eleventh biology"]),
   makeEntry(11, "Accounts",       "Accountancy Part 1 – Class 11","keac1",  true, 7,  false, ["class 11 accounts","class 11 accountancy","grade 11 accounts","eleventh accounts"]),
+  makeEntry(11, "Accounts Part 2","Accountancy Part 2 – Class 11","keac2",  true, 2,  false, ["class 11 accounts part 2","eleventh accountancy part 2"]),
+  makeEntry(11, "Economics",      "Indian Economic Development – Class 11", "keec1", true, 8, false, ["class 11 economics","grade 11 economics","eleventh economics"]),
+  makeEntry(11, "Business Studies", "Business Studies – Class 11", "kebs1", true, 11, false, ["class 11 business studies","grade 11 business","eleventh business studies"]),
+  makeEntry(11, "History",        "Themes in World History – Class 11", "kehe1", true, 7, false, ["class 11 history","grade 11 history","eleventh history"]),
+  makeEntry(11, "Geography",      "Physical Geography – Class 11", "kegy1", true, 6, false, ["class 11 geography","grade 11 geography","eleventh geography"]),
+  makeEntry(11, "English",        "Hornbill – Class 11",          "keep2",  true, 8,  false, ["class 11 english","hornbill class 11","grade 11 english","eleventh english"]),
+  makeEntry(11, "Hindi",          "Aroh – Class 11",              "khsk1",  true, 11, false, ["class 11 hindi","aroh class 11","grade 11 hindi","eleventh hindi"]),
+
+  // ── Class 12 ────────────────────────── PDF chapters confirmed ✓ — BOARD
+  makeEntry(12, "Physics",        "Physics Part 1 – Class 12",   "leph1",  true, 8,  true,  ["class 12 physics","grade 12 physics","twelfth physics","class twelve physics"]),
+  makeEntry(12, "Physics Part 2", "Physics Part 2 – Class 12",   "leph2",  true, 6,  true,  ["class 12 physics part 2","twelfth physics part 2"]),
+  makeEntry(12, "Chemistry",      "Chemistry Part 1 – Class 12", "lech1",  true, 5,  true,  ["class 12 chemistry","grade 12 chemistry","twelfth chemistry"]),
+  makeEntry(12, "Chemistry Part 2", "Chemistry Part 2 – Class 12", "lech2", true, 5, true,  ["class 12 chemistry part 2","twelfth chemistry part 2"]),
+  makeEntry(12, "Maths",          "Mathematics Part 1 – Class 12","lemh1",  true, 6,  true,  ["class 12 maths","grade 12 maths","twelfth maths","class 12 mathematics"]),
+  makeEntry(12, "Maths Part 2",   "Mathematics Part 2 – Class 12","lemh2",  true, 7,  true,  ["class 12 maths part 2","twelfth maths part 2"]),
+  makeEntry(12, "Biology",        "Biology – Class 12",           "lebo1",  true, 13, true,  ["class 12 biology","grade 12 biology","twelfth biology"]),
+  makeEntry(12, "Accounts",       "Accountancy Part 1 – Class 12","leac1",  true, 4,  true,  ["class 12 accounts","class 12 accountancy","grade 12 accounts","twelfth accounts","twelfth accountancy"]),
+  makeEntry(12, "Accounts Part 2","Accountancy Part 2 – Class 12","leac2",  true, 6,  true,  ["class 12 accounts part 2","twelfth accountancy part 2"]),
+  makeEntry(12, "Economics",      "Macroeconomics – Class 12",    "leec1",  true, 6,  true,  ["class 12 economics","grade 12 economics","twelfth economics","macroeconomics"]),
+  makeEntry(12, "Business Studies","Business Studies Part 1 – Class 12", "lebs1", true, 8, true, ["class 12 business studies","grade 12 business","twelfth business studies"]),
+  makeEntry(12, "History",        "Themes in Indian History – Class 12",  "lehs1", true, 4, true, ["class 12 history","grade 12 history","twelfth history"]),
+  makeEntry(12, "Geography",      "Fundamentals of Human Geography – Class 12", "legy1", true, 8, true, ["class 12 geography","grade 12 geography","twelfth geography"]),
+  makeEntry(12, "English",        "Flamingo – Class 12",          "leep2",  true, 8,  true,  ["class 12 english","flamingo class 12","grade 12 english","twelfth english"]),
+  makeEntry(12, "Hindi",          "Aroh – Class 12",              "lhsk1",  true, 10, true,  ["class 12 hindi","aroh class 12","grade 12 hindi","twelfth hindi"]),
+];
+
+// ── Fuzzy matcher ────────────────────────────────────────────────────────────
+
+export function findTextbook(query: string): TextbookEntry | null {
+  const q = query.toLowerCase().trim();
+
+  // 1. Direct alias match (longest alias wins)
+  let bestAlias: TextbookEntry | null = null;
+  let bestAliasLen = 0;
+  for (const book of TEXTBOOKS) {
+    for (const alias of book.aliases) {
+      if (q.includes(alias) && alias.length > bestAliasLen) {
+        bestAlias = book;
+        bestAliasLen = alias.length;
+      }
+    }
+  }
+  if (bestAlias) return bestAlias;
 
   // 2. Grade + subject extraction
   const gradeMatch = q.match(/\b(1[0-2]|[1-9])\b/);

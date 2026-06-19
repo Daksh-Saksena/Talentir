@@ -9,8 +9,11 @@
  * Fires onCommand when it hears BOTH a grade AND a subject word,
  * or a trigger verb + at least one of grade/subject.
  *
- * Bug-fix: all callbacks stored in refs so SpeechRecognition's
- * event handlers always see the latest versions (no stale closures).
+ * Bug-fix over original:
+ * - Debounce onend restart: never restart within 5s of previous restart
+ *   (prevents Chrome silent-onend infinite "Restarting…Listening…" loop)
+ * - All callbacks stored in refs so SpeechRecognition's
+ *   event handlers always see the latest versions (no stale closures).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -144,6 +147,12 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
   const wantListeningRef = useRef(false);   // "should I be running?"
   const recRef = useRef<any>(null);
 
+  // ══ Restart debounce ═════════════════════════════════════════════════════
+  // Chrome fires onend after ~5s of silence in continuous mode. Without
+  // debounce, restart in 300ms → immediate onend → infinite loop.
+  const lastRestartTimeRef = useRef(0);
+  const MIN_RESTART_INTERVAL = 5000; // ms — at least 5s between restarts
+
   // Keep refs current on every render
   useEffect(() => { onCommandRef.current = onCommand; }, [onCommand]);
   useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
@@ -234,10 +243,26 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
       setIsListening(false);
       // Auto-restart only if we still want to be listening
       if (wantListeningRef.current) {
-        setStatusMsg("Restarting…");
-        setTimeout(() => {
-          if (wantListeningRef.current) startRecognition();
-        }, 300);
+        const now = Date.now();
+        const timeSinceLastRestart = now - lastRestartTimeRef.current;
+
+        if (timeSinceLastRestart < MIN_RESTART_INTERVAL) {
+          // Debounce: don't restart yet — wait until minimum interval has passed
+          const waitTime = MIN_RESTART_INTERVAL - timeSinceLastRestart;
+          setStatusMsg(`Waiting ${Math.ceil(waitTime / 1000)}s…`);
+          setTimeout(() => {
+            if (wantListeningRef.current) {
+              lastRestartTimeRef.current = Date.now();
+              startRecognition();
+            }
+          }, waitTime);
+        } else {
+          setStatusMsg("Restarting…");
+          lastRestartTimeRef.current = now;
+          setTimeout(() => {
+            if (wantListeningRef.current) startRecognition();
+          }, 300);
+        }
       } else {
         setStatusType("idle");
         setStatusMsg("Voice off");
@@ -271,6 +296,7 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
       stopRecognition();
     } else {
       wantListeningRef.current = true;
+      lastRestartTimeRef.current = 0; // reset debounce
       startRecognition();
     }
   }
@@ -279,6 +305,7 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
   useEffect(() => {
     if (active && !wantListeningRef.current) {
       wantListeningRef.current = true;
+      lastRestartTimeRef.current = 0; // reset debounce
       startRecognition();
     }
     if (!active && wantListeningRef.current) {
