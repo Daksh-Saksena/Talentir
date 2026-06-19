@@ -3,19 +3,55 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 
-// PhET simulation map
+// PhET simulation map — 60+ simulations covering physics, chemistry, biology, math
 const SIMS: Record<string, string> = {
+  // Physics — Mechanics
   'forces':'forces-and-motion-basics','friction':'friction','projectile-motion':'projectile-motion',
-  'gravity':'gravity-force-lab','energy':'energy-skate-park-basics','waves':'waves-intro',
-  'density':'density','pendulum':'pendulum-lab','circuit':'circuit-construction-kit-dc',
-  'lens':'geometric-optics','atom':'build-an-atom','isotope':'isotopes-and-atomic-mass',
+  'gravity':'gravity-force-lab','energy':'energy-skate-park-basics','pendulum':'pendulum-lab',
+  'spring':'masses-and-springs','rotation':'torque','vector':'vector-addition',
+  'motion':'forces-and-motion-basics','collision':'collision-lab','ramp':'the-ramp',
+  'linear-momentum':'collision-lab','free-body-diagram':'forces-and-motion-basics',
+  'centripetal':'gravity-force-lab-basics','fluid':'under-pressure',
+  'pressure':'under-pressure','buoyancy':'under-pressure',
+  // Physics — Waves & Light
+  'waves':'waves-intro','light':'bending-light','refraction':'bending-light',
+  'lens':'geometric-optics','optics':'geometric-optics','sound':'sound-waves',
+  'wave-interference':'wave-interference','diffraction':'wave-interference',
+  'resonance':'resonance','fourier':'fourier-making-waves',
+  // Physics — Electricity & Magnetism
+  'circuit':'circuit-construction-kit-dc','ohm':'ohms-law','resistor':'ohms-law',
+  'capacitor':'capacitor-lab-basics','coulomb':'coulombs-law','faraday':'faradays-law',
+  'magnetism':'magnets-and-electromagnets','electromagnet':'magnets-and-electromagnets',
+  'electric-field':'charges-and-fields','static':'balloons-and-static-electricity',
+  'induction':'faradays-law','generator':'generator',
+  // Physics — Modern & Nuclear
+  'photoelectric':'photoelectric-effect','quantum':'quantum-wave-interference',
+  'nuclear':'nuclear-fission','radioactive':'radioactive-dating-game',
+  'atom':'build-an-atom','isotope':'isotopes-and-atomic-mass',
+  'rutherford':'rutherford-scattering','laser':'lasers',
+  // Chemistry
   'molecule':'molecule-shapes','ph':'ph-scale','balancing':'balancing-chemical-equations',
   'reactant':'reactants-products-and-leftovers','concentration':'concentration',
+  'molarity':'molarity','acid-base':'acid-base-solutions',
+  'gas':'gas-properties','diffusion':'diffusion','states-of-matter':'states-of-matter',
+  'chemical-bond':'molecule-polarity','polarity':'molecule-polarity',
+  'density':'density','dissolution':'sugar-and-salt-solutions',
+  'titration':'acid-base-solutions',
+  // Biology
+  'natural-selection':'natural-selection','evolution':'natural-selection',
+  'gene':'gene-expression-essentials','dna':'gene-expression-essentials',
+  'membrane':'membrane-channels','neuron':'neuron',
+  // Math
   'graphing':'graphing-quadratics','trig':'trig-tour','area':'area-model-algebra',
-  'vector':'vector-addition','ohm':'ohms-law','coulomb':'coulombs-law',
-  'faraday':'faradays-law','capacitor':'capacitor-lab-basics',
-  'diffusion':'diffusion','gas':'gas-properties','motion':'forces-and-motion-basics',
-  'rotation':'torque','slope':'graphing-slope-intercept','spring':'masses-and-springs',
+  'slope':'graphing-slope-intercept','fraction':'fractions-intro',
+  'proportion':'proportion-playground','statistics':'plinko-probability',
+  'probability':'plinko-probability','function':'function-builder',
+  'calculus':'calculus-grapher','derivative':'calculus-grapher',
+  'parabola':'graphing-quadratics','linear-equation':'graphing-slope-intercept',
+  // Earth & Space
+  'greenhouse':'greenhouse-effect','blackbody':'blackbody-spectrum',
+  'solar':'my-solar-system','orbit':'my-solar-system','kepler':'keplers-laws',
+  'gravity-space':'gravity-force-lab-basics','plate-tectonics':'plate-tectonics',
 };
 
 interface Student {
@@ -26,8 +62,19 @@ export default function LiveClassPage() {
   const { user } = useAuth();
   const [apiKey] = useState(process.env.NEXT_PUBLIC_OPENAI_API_KEY || "");
   const [deepgramKey] = useState(process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY || "");
+  const serperKey = process.env.NEXT_PUBLIC_SERPER_API_KEY || "";
   
-  const [activeMedia, setActiveMedia] = useState<{type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null>(null);
+  const [activeMedia, _setActiveMedia] = useState<{type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null>(null);
+  const activeMediaRef = useRef<{type: string, key: string} | null>(null);
+  const lastUpdateTimeRef = useRef<number>(0);
+
+  const setActiveMedia = (media: {type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null) => {
+    _setActiveMedia(media);
+    activeMediaRef.current = media ? { type: media.type, key: media.key } : null;
+    if (media) {
+      lastUpdateTimeRef.current = Date.now();
+    }
+  };
   const [thinking, setThinking] = useState("Standby");
   const [isListening, setIsListening] = useState(false);
   const [countdown, setCountdown] = useState(30);
@@ -300,6 +347,7 @@ export default function LiveClassPage() {
   }, [isListening]);
 
   const processTranscript = (cleaned: string) => {
+    console.log("%c[Speech Heard]:", "color: #a855f7; font-weight: bold;", cleaned);
     const currentIndex = attendanceIndexRef.current;
     if (cleaned.includes("space") || cleaned.includes("star") || cleaned.includes("galaxy")) setMood("space");
     else if (cleaned.includes("ocean") || cleaned.includes("water") || cleaned.includes("sea")) setMood("ocean");
@@ -469,15 +517,53 @@ export default function LiveClassPage() {
       if (transcriptBuffer.current.length > 8) transcriptBuffer.current.shift();
       setCountdown(30); 
     }
+
+    const context = transcriptBuffer.current.join(" ");
+    if (!context.trim()) {
+      if (isTrigger) {
+        setActiveMedia(null);
+      }
+      setThinking("Active");
+      return;
+    }
+
     setThinking("AI Thinking...");
     try {
-      const context = transcriptBuffer.current.join(" ");
-      const prompt = `Transcript: "${context}". You are a proactive classroom visual assistant.
+      const simKeys = Object.keys(SIMS).join(', ');
+      const prompt = `Transcript: "${context}". You are a proactive classroom visual assistant. Choose the BEST visual aid.
       RULES:
-      - ALWAYS set "type" to "image" unless a PhET simulation keyword matches. NEVER return "none" unless the transcript is empty gibberish.
-      - "key" must be a specific, searchable Wikipedia topic (e.g. "Solar System", "Eiffel Tower", "Mitochondria").
-      - Extract topic, summary, and any homework mentioned.
-      Reply JSON: {"topic":"string","summary":"string","homework":["string"],"type":"sim"|"image"|"video"|"formula","key":"specific wikipedia search term","caption":"why this visual helps"}`;
+      - "type" must be one of: "sim" | "gif" | "image" | "formula" | "none".
+      - Use "none" if the transcript contains only greetings, small talk, administrative chat, classroom management instructions (e.g. "hello guys", "lets start class in a minute", "sit down", "listen up"), or if no visual aid is useful for the content.
+      - Use "sim" ONLY if the topic exactly matches one of these PhET simulation keys: [${simKeys}]. Set "key" to the matching key from the list.
+      - Use "gif" for dynamic processes: chemical reactions, cell division, wave motion, orbits, water cycles, etc.
+      - Use "image" for concepts, places, diagrams, portraits, structures, charts.
+      - Use "formula" for equations and mathematical expressions.
+      - "key" for "gif" and "image" must be a short, specific, high-quality image search term (2-4 words max, e.g. "chemical bonding", "human heart", "solar system", "mitosis cell division").
+      - Change the visual whenever the subtopic shifts, even within the same lesson.
+      - Extract explicit tasks/todos mentioned in the transcript into the "homework" array ONLY if the teacher explicitly commands or assigns them as NEW future requirements (e.g. "Bring your notebooks tomorrow", "Finish this for homework").
+      - CRITICAL: Do NOT extract past, completed, or already assigned tasks that the teacher is just reviewing, checking, referencing, or discussing as something that was already done (e.g. "I hope you completed yesterday's HW", "We checked the exercises", "I'm hoping you completed your homework from last class which was doing exercise 5 and 6", "yesterday's homework was exercise 6 and 7", "i hope you finished your linear equation homework", "you will exercise three and four"). Only extract newly assigned tasks.
+      - If the teacher references past homework/exercises and says "make sure to focus", "catch up", or "you need to complete" in the context of catching up on old/previous work, do NOT count it as a new homework/todo.
+      - Do NOT assume, infer, or invent any tasks/todos. If the teacher does not explicitly assign a task, the "homework" array must be empty.
+      - Formatting rules: Prefix a task with "(HW) " ONLY if the teacher explicitly refers to it as homework or HW (e.g. "This is your homework", "Homework is questions 1-5"). For other explicit tasks (e.g. "Bring your notebooks tomorrow", "Finish this tonight"), do not add the "(HW) " prefix.
+      
+      EXAMPLES:
+      1. Transcript: "Good morning class. I'm hoping you completed your homework from last class which was doing exercise five and six. Okay. Now let's continue on."
+         Output: {"topic":"Intro","summary":"Starting the class.","homework":[],"type":"none","key":"","caption":""}
+         (Explanation: "exercise five and six" is referred to as "homework from last class which was", so it is past homework and must not be extracted).
+      
+      2. Transcript: "We will study chemical bonding today. For homework, do page 193 questions 1 to 5. Also bring your textbook tomorrow."
+         Output: {"topic":"Chemical Bonding","summary":"Beginning study of chemical bonding.","homework":["(HW) Do page 193 questions 1 to 5", "Bring your textbook tomorrow"],"type":"image","key":"chemical bonding","caption":"An illustration of chemical bonding."}
+         (Explanation: Page 193 is explicitly assigned as new homework today, and bringing textbooks is an explicit command for tomorrow).
+      
+      3. Transcript: "Yesterday's homework was exercise six and seven. So today's homework will be on page 193."
+         Output: {"topic":"Classwork","summary":"Reviewing past work and assigning new homework.","homework":["(HW) Homework on page 193"],"type":"none","key":"","caption":""}
+         (Explanation: Exercise 6 and 7 is yesterday's homework, so it is ignored. Page 193 is today's homework, so it is prefixed with (HW) and extracted).
+
+      4. Transcript: "hello, guys. i hope you finished your linear equation homework. you will exercise three and four. so, okay. it seems you need to complete exercises. but is it harder? make sure to focus on your linear equations to catch up."
+         Output: {"topic":"Linear Equations","summary":"Greeting the class and discussing linear equations homework catch-up.","homework":[],"type":"none","key":"","caption":""}
+         (Explanation: "finished your linear equation homework" and "exercise three and four" refer to catching up on past homework, so no new homework/todo is created).
+
+      Reply ONLY valid JSON: {"topic":"string","summary":"string","homework":["string"],"type":"sim"|"gif"|"image"|"formula"|"none","key":"string","caption":"why this visual helps"}`;
       
       const r = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
@@ -491,41 +577,96 @@ export default function LiveClassPage() {
       if (dec.homework && dec.homework.length > 0) setTodos(prev => Array.from(new Set([...prev, ...dec.homework])));
 
       if (dec.type !== "none") {
-          setIsRefreshing(true);
-          let finalUrl = null;
-          if (dec.type === "video") finalUrl = await fetchWikiMedia(dec.key, true);
-          if (!finalUrl && (dec.type === "image" || dec.type === "video")) finalUrl = await fetchWikiMedia(dec.key, false);
-          setTimeout(() => {
-            if (dec.type === "sim" && SIMS[dec.key]) setActiveMedia({ type: "sim", key: SIMS[dec.key], caption: dec.caption });
-            else if (dec.type === "formula") setActiveMedia({ type: "formula", key: dec.key, caption: dec.caption });
-            else if (finalUrl) setActiveMedia({ type: dec.type as any, key: dec.key, caption: dec.caption, url: finalUrl });
-            setIsRefreshing(false);
-          }, 400);
+          const isDifferentVisual = 
+            !activeMediaRef.current || 
+            activeMediaRef.current.key.toLowerCase().trim() !== dec.key.toLowerCase().trim() || 
+            activeMediaRef.current.type !== dec.type;
+          
+          const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
+          const minGap = isDifferentVisual ? 10000 : 30000;
+          const isFirstMedia = !activeMediaRef.current;
+          
+          if (isFirstMedia || timeSinceLastUpdate >= minGap || isTrigger) {
+              let finalUrl: string | null = null;
+              if (dec.type === "sim") {
+                if (!SIMS[dec.key]) return;
+              } else if (dec.type === "formula") {
+                // Formulas are text, ready instantly
+              } else {
+                if (dec.type === "gif") finalUrl = await fetchGoogleImages(dec.key, true);
+                if (!finalUrl && (dec.type === "image" || dec.type === "gif")) finalUrl = await fetchGoogleImages(dec.key, false);
+                // Fallback to Wikipedia if Google Search returns nothing
+                if (!finalUrl && dec.type !== "sim" && dec.type !== "formula") finalUrl = await fetchWikiMedia(dec.key);
+                
+                // If we couldn't find any visual, keep the current visual on screen and do not switch
+                if (!finalUrl) return;
+
+                // Pre-load the image in the background so it's fully ready before switching
+                try {
+                  await new Promise((resolve) => {
+                    const img = new Image();
+                    img.src = finalUrl!;
+                    img.onload = () => resolve(true);
+                    img.onerror = () => resolve(false);
+                    setTimeout(() => resolve(false), 5000); // 5s timeout max
+                  });
+                } catch (e) {
+                  console.log("Preload failed, switching anyway");
+                }
+              }
+
+              // Now we have the next visual ready! Trigger a quick transition
+              setIsRefreshing(true);
+              setTimeout(() => {
+                if (dec.type === "sim") setActiveMedia({ type: "sim", key: SIMS[dec.key], caption: dec.caption });
+                else if (dec.type === "formula") setActiveMedia({ type: "formula", key: dec.key, caption: dec.caption });
+                else if (finalUrl) setActiveMedia({ type: "image", key: dec.key, caption: dec.caption, url: finalUrl });
+                setIsRefreshing(false);
+              }, 150);
+          }
       } else if (isTrigger) setActiveMedia(null);
       setThinking("Active");
     } catch (e: any) { setThinking("Error"); }
   };
 
-  const fetchWikiMedia = async (query: string, animatedOnly: boolean) => {
+  // Fetch from Google Images via Serper.dev API — picks a RANDOM image from top results for variety
+  const fetchGoogleImages = async (query: string, gifOnly: boolean) => {
     try {
-       const searchQuery = animatedOnly ? `${query} filetype:gif` : query;
-       const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(searchQuery)}&gsrlimit=1&prop=pageimages|images&pithumbsize=1200`);
+      if (!serperKey) return null;
+      const q = gifOnly ? `${query} filetype:gif` : query;
+      const res = await fetch("https://google.serper.dev/images", {
+        method: "POST",
+        headers: {
+          "X-API-KEY": serperKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          q,
+          safe: "active"
+        })
+      });
+      const data = await res.json();
+      if (data.images && data.images.length > 0) {
+        // Pick randomly from top 10 to ensure variety on repeated searches
+        const pick = data.images[Math.floor(Math.random() * Math.min(data.images.length, 10))];
+        console.log(`%c[Google Images] Found "${query}" (gif: ${gifOnly}):`, 'color: #3b82f6; font-weight: bold;', pick.imageUrl);
+        return pick.imageUrl || null;
+      }
+      return null;
+    } catch (e) {
+      console.error("[Google Images Error]", e);
+      return null;
+    }
+  };
+
+  // Fallback: Wikipedia thumbnail (free, no key needed)
+  const fetchWikiMedia = async (query: string) => {
+    try {
+       const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=1&prop=pageimages&pithumbsize=1200`);
        const data = await res.json();
        if (!data.query?.pages) return null;
        const pages = data.query.pages;
-       const pageId = Object.keys(pages)[0];
-       if (animatedOnly) {
-         const images = pages[pageId].images;
-         if (images) {
-           const gifFile = images.find((img: any) => img.title.toLowerCase().endsWith('.gif'));
-           if (gifFile) {
-             const fileRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(gifFile.title)}&prop=imageinfo&iiprop=url`);
-             const fileData = await fileRes.json();
-             return fileData.query.pages[Object.keys(fileData.query.pages)[0]].imageinfo[0].url;
-           }
-         }
-       }
-       return pages[pageId].thumbnail?.source || null;
+       return pages[Object.keys(pages)[0]].thumbnail?.source || null;
     } catch (e) { return null; }
   };
 
@@ -598,7 +739,7 @@ export default function LiveClassPage() {
       <div className="absolute right-6 bottom-6 w-72 z-50 pointer-events-none">
          <div className="p-8 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[40px] shadow-2xl animate-fade-up flex flex-col gap-6">
             <div className="flex items-center justify-between">
-               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/30">Action Items</span>
+               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/30">ToDo lists</span>
                <span className="text-[8px] font-mono text-white/20">{todos.length} Active</span>
             </div>
             <div className="flex flex-col gap-3">
@@ -608,7 +749,7 @@ export default function LiveClassPage() {
                      <p className="text-xs text-white/60 font-medium leading-relaxed">{todo}</p>
                   </div>
                )) : (
-                  <p className="text-[10px] text-white/10 italic">No homework mentioned yet...</p>
+                  <p className="text-[10px] text-white/10 italic">No tasks mentioned yet...</p>
                )}
             </div>
          </div>
@@ -747,13 +888,27 @@ export default function LiveClassPage() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 relative z-10 flex items-center justify-center px-80">
-        <div className={`w-full h-full transition-all duration-1000 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
-          {activeMedia ? (
+      <div className="flex-1 relative z-10 flex items-center justify-center px-24">
+        <div className={`w-full h-full transition-all duration-300 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
+           {activeMedia ? (
             <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
                {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none" allowFullScreen /> )}
-               {(activeMedia.type === "image" || activeMedia.type === "video") && ( <img src={activeMedia.url} key={activeMedia.url} className="max-w-[85%] max-h-[85%] object-contain rounded-[60px] shadow-2xl animate-fade-in" alt="" /> )}
+               {activeMedia.type === "image" && activeMedia.url?.endsWith('.mp4') && (
+                 <video key={activeMedia.url} src={activeMedia.url} autoPlay loop muted playsInline
+                   className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" />
+               )}
+               {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
+                 <img src={activeMedia.url} key={activeMedia.url} className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" alt="" />
+               )}
                {activeMedia.type === "formula" && ( <div className="p-20 text-center animate-fade-up"> <h2 className="text-7xl font-light tracking-widest text-white/80 drop-shadow-[0_0_30px_rgba(255,255,255,0.2)] font-serif italic">{activeMedia.key}</h2> </div> )}
+               {/* Caption */}
+               {activeMedia.caption && (
+                 <div className="absolute bottom-6 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                   <div className="px-6 py-2 bg-black/60 backdrop-blur-xl rounded-full border border-white/10">
+                     <span className="text-[10px] text-white/60 tracking-widest">{activeMedia.caption}</span>
+                   </div>
+                 </div>
+               )}
             </div>
           ) : ( <div className="flex flex-col items-center gap-4 animate-fade-in opacity-10"> <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" /> </div> )}
         </div>
