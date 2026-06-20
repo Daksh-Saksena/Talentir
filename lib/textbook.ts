@@ -76,6 +76,17 @@ export function getBookProxyUrl(book: TextbookEntry): string {
   return raw; // grades 1-8 go direct to NCERT viewer (not a PDF)
 }
 
+/**
+ * Returns the proxy-wrapped URL for a specific chapter of a book.
+ */
+export function getChapterProxyUrl(book: TextbookEntry, chapter: number): string {
+  if (!book.hasPdf) {
+    return ncertViewerUrl(book.code, book.chapters);
+  }
+  const raw = chapterPdfUrl(book.code, chapter);
+  return `/api/pdf-proxy?url=${encodeURIComponent(raw)}`;
+}
+
 // ── Textbook registry ─────────────────────────────────────────────────────────
 // All codes verified against https://ncert.nic.in/textbook.php dropdown
 
@@ -259,4 +270,71 @@ export function findTextbook(query: string): TextbookEntry | null {
   if (subject) return TEXTBOOKS.find((b) => b.subject.toLowerCase().startsWith(subject!.toLowerCase())) ?? null;
 
   return null;
+}
+
+/**
+ * Parse a voice command to extract grade, subject, and chapter number.
+ * e.g. "open physics class 12 chapter 1" → { grade: 12, subject: "Physics", chapter: 1 }
+ * e.g. "class 10 science chapter 5" → { grade: 10, subject: "Science", chapter: 5 }
+ */
+export function parseVoiceCommand(text: string): { grade: number | null; subject: string | null; chapter: number | null } {
+  const t = text.toLowerCase().trim();
+
+  // Extract chapter number
+  let chapter: number | null = null;
+  const chMatch = t.match(/(?:chapter|ch)\s*(\d+)/i);
+  if (chMatch && chMatch[1]) {
+    chapter = parseInt(chMatch[1], 10);
+  }
+
+  // Grade
+  let grade: number | null = null;
+  for (const [phrase, num] of [
+    ["class twelve", 12], ["class eleven", 11], ["class ten", 10],
+    ["class nine", 9],    ["class eight", 8],   ["class seven", 7],
+    ["class six", 6],     ["class five", 5],    ["class four", 4],
+    ["class three", 3],   ["class two", 2],     ["class one", 1],
+    ["grade twelve", 12], ["grade eleven", 11], ["grade ten", 10],
+    ["grade nine", 9],    ["grade eight", 8],   ["grade seven", 7],
+    ["grade six", 6],     ["grade five", 5],    ["grade four", 4],
+    ["grade three", 3],   ["grade two", 2],     ["grade one", 1],
+    ["class 12", 12], ["class 11", 11], ["class 10", 10],
+    ["class 9", 9],   ["class 8", 8],   ["class 7", 7],
+    ["class 6", 6],   ["class 5", 5],   ["class 4", 4],
+    ["class 3", 3],   ["class 2", 2],   ["class 1", 1],
+    ["grade 12", 12], ["grade 11", 11], ["grade 10", 10],
+    ["grade 9", 9],   ["grade 8", 8],   ["grade 7", 7],
+    ["grade 6", 6],   ["grade 5", 5],   ["grade 4", 4],
+    ["grade 3", 3],   ["grade 2", 2],   ["grade 1", 1],
+    ["twelfth", 12], ["eleventh", 11], ["tenth", 10],
+    ["ninth", 9],    ["eighth", 8],    ["seventh", 7],
+    ["sixth", 6],    ["fifth", 5],     ["fourth", 4],
+    ["third", 3],    ["second", 2],    ["first", 1],
+  ]) {
+    if (t.includes(phrase)) { grade = num; break; }
+  }
+  if (grade === null) {
+    const m = t.match(/\b(1[0-2]|[1-9])\b/);
+    if (m) grade = parseInt(m[1], 10);
+  }
+
+  // Subject
+  let subject: string | null = null;
+  for (const [phrase, name] of [
+    ["social science", "Social Science"], ["social studies", "Social Science"],
+    ["physics", "Physics"], ["chemistry", "Chemistry"],
+    ["mathematics", "Maths"], ["biology", "Biology"],
+    ["science", "Science"], ["english", "English"],
+    ["maths", "Maths"], ["math", "Maths"],
+    ["hindi", "Hindi"], ["sanskrit", "Sanskrit"],
+    ["history", "History"], ["geography", "Geography"],
+    ["economics", "Economics"], ["accountancy", "Accounts"],
+    ["accounts", "Accounts"], ["business", "Business Studies"],
+    ["evs", "EVS"], ["bio", "Biology"],
+    ["chem", "Chemistry"], ["sst", "Social Science"],
+  ]) {
+    if (t.includes(phrase)) { subject = name; break; }
+  }
+
+  return { grade, subject, chapter };
 }

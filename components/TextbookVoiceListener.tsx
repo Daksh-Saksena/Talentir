@@ -3,25 +3,26 @@
 /**
  * TextbookVoiceListener
  * ──────────────────────
- * Browser Web Speech API — continuous recognition in Chrome/Edge.
- * Keyword-first local parser: no external API needed.
+ * Uses Deepgram's real-time WebSocket API for accurate speech recognition.
+ * Falls back to browser SpeechRecognition if Deepgram is unavailable.
  *
- * Fires onCommand when it hears BOTH a grade AND a subject word,
- * or a trigger verb + at least one of grade/subject.
+ * Shows recognized words in real-time, and fires onCommand when it detects
+ * a grade + subject (and optionally a chapter number).
  *
- * Bug-fix over original:
- * - Debounce onend restart: never restart within 5s of previous restart
- *   (prevents Chrome silent-onend infinite "Restarting…Listening…" loop)
- * - All callbacks stored in refs so SpeechRecognition's
- *   event handlers always see the latest versions (no stale closures).
+ * Supports commands like:
+ *   "open physics class 12 chapter 1" → opens Chapter 1 of Class 12 Physics
+ *   "class 10 science" → opens Class 10 Science (Chapter 1)
+ *   "show class 9 maths chapter 5" → opens Chapter 5 of Class 9 Maths
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { parseVoiceCommand } from "@/lib/textbook";
 
 export interface VoiceCommand {
   type: "open_book";
   query: string;
   raw: string;
+  chapter?: number | null;
 }
 
 interface Props {
@@ -30,155 +31,173 @@ interface Props {
   active?: boolean;
 }
 
-// ── Grade keyword table ───────────────────────────────────────────────────────
-const GRADE_MAP: [string, number][] = [
-  // multi-word first (longest match wins)
-  ["class twelve", 12], ["class eleven", 11], ["class ten", 10],
-  ["class nine", 9],    ["class eight", 8],   ["class seven", 7],
-  ["class six", 6],     ["class five", 5],    ["class four", 4],
-  ["class three", 3],   ["class two", 2],     ["class one", 1],
-  ["grade twelve", 12], ["grade eleven", 11], ["grade ten", 10],
-  ["grade nine", 9],    ["grade eight", 8],   ["grade seven", 7],
-  ["grade six", 6],     ["grade five", 5],    ["grade four", 4],
-  ["grade three", 3],   ["grade two", 2],     ["grade one", 1],
-  ["std twelve", 12],   ["std eleven", 11],   ["std ten", 10],
-  ["standard 12", 12],  ["standard 11", 11],  ["standard 10", 10],
-  ["standard 9", 9],    ["standard 8", 8],    ["standard 7", 7],
-  ["standard 6", 6],    ["standard 5", 5],    ["standard 4", 4],
-  // digit forms
-  ["class 12", 12], ["class 11", 11], ["class 10", 10],
-  ["class 9", 9],   ["class 8", 8],   ["class 7", 7],
-  ["class 6", 6],   ["class 5", 5],   ["class 4", 4],
-  ["class 3", 3],   ["class 2", 2],   ["class 1", 1],
-  ["grade 12", 12], ["grade 11", 11], ["grade 10", 10],
-  ["grade 9", 9],   ["grade 8", 8],   ["grade 7", 7],
-  ["grade 6", 6],   ["grade 5", 5],   ["grade 4", 4],
-  ["grade 3", 3],   ["grade 2", 2],   ["grade 1", 1],
-  ["std 12", 12],   ["std 11", 11],   ["std 10", 10],
-  ["std 9", 9],     ["std 8", 8],     ["std 7", 7],
-  // ordinal words alone
-  ["twelfth", 12], ["eleventh", 11], ["tenth", 10],
-  ["ninth", 9],    ["eighth", 8],    ["seventh", 7],
-  ["sixth", 6],    ["fifth", 5],     ["fourth", 4],
-  ["third", 3],    ["second", 2],    ["first", 1],
-];
-
-// ── Subject keyword table ─────────────────────────────────────────────────────
-const SUBJECT_MAP: [string, string][] = [
-  ["social science", "Social Science"],
-  ["social studies", "Social Science"],
-  ["environmental science", "EVS"],
-  ["business studies", "Business Studies"],
-  ["physical education", "Physical Education"],
-  ["political science", "Social Science"],
-  ["physics", "Physics"],
-  ["chemistry", "Chemistry"],
-  ["mathematics", "Maths"],
-  ["biology", "Biology"],
-  ["science", "Science"],
-  ["english", "English"],
-  ["maths", "Maths"],
-  ["math", "Maths"],
-  ["hindi", "Hindi"],
-  ["sanskrit", "Sanskrit"],
-  ["history", "History"],
-  ["geography", "Geography"],
-  ["economics", "Economics"],
-  ["accountancy", "Accounts"],
-  ["accounts", "Accounts"],
-  ["business", "Business Studies"],
-  ["civics", "Social Science"],
-  ["evs", "EVS"],
-  ["bio", "Biology"],
-  ["chem", "Chemistry"],
-  ["phy", "Physics"],
-  ["geo", "Geography"],
-  ["eco", "Economics"],
-  ["sst", "Social Science"],
-  ["eng", "English"],
-];
-
-const TRIGGER_VERBS = [
-  "pull up", "bring up", "give me", "open up",
-  "open", "show", "load", "display", "get",
-  "read", "study", "launch", "start",
-];
-
-// ── Parser ────────────────────────────────────────────────────────────────────
-function parseCommand(raw: string): { grade: number | null; subject: string | null } {
-  const t = raw.toLowerCase().trim();
-
-  // Grade — try each phrase in order (longest first in the table)
-  let grade: number | null = null;
-  for (const [phrase, num] of GRADE_MAP) {
-    if (t.includes(phrase)) { grade = num; break; }
-  }
-  // Bare digit fallback: "10 maths", "physics 12"
-  if (grade === null) {
-    const m = t.match(/\b(1[0-2]|[1-9])\b/);
-    if (m) grade = parseInt(m[1], 10);
-  }
-
-  // Subject
-  let subject: string | null = null;
-  for (const [phrase, name] of SUBJECT_MAP) {
-    if (t.includes(phrase)) { subject = name; break; }
-  }
-
-  return { grade, subject };
-}
-
-function hasTrigger(t: string): boolean {
-  const lower = t.toLowerCase();
-  return TRIGGER_VERBS.some((v) => lower.includes(v));
-}
+const DEEPGRAM_API_KEY = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY ?? "";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function TextbookVoiceListener({ onCommand, onTranscript, active = false }: Props) {
   const [isListening, setIsListening] = useState(false);
-  const [liveText, setLiveText] = useState("");          // interim text
+  const [liveText, setLiveText] = useState("");          // interim text shown to user
   const [lastFired, setLastFired] = useState("");        // last matched command
   const [statusMsg, setStatusMsg] = useState("Voice off");
   const [statusType, setStatusType] = useState<"idle" | "on" | "error" | "bad-browser">("idle");
+  const [recognizedWords, setRecognizedWords] = useState<string[]>([]); // rolling window of words
 
-  // Always-current refs — SpeechRecognition event handlers read from these
+  // Refs
   const onCommandRef = useRef(onCommand);
   const onTranscriptRef = useRef(onTranscript);
-  const wantListeningRef = useRef(false);   // "should I be running?"
-  const recRef = useRef<any>(null);
-
-  // ══ Restart debounce ═════════════════════════════════════════════════════
-  // Chrome fires onend after ~5s of silence in continuous mode. Without
-  // debounce, restart in 300ms → immediate onend → infinite loop.
+  const wantListeningRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const recRef = useRef<any>(null); // browser SpeechRecognition fallback
   const lastRestartTimeRef = useRef(0);
-  const MIN_RESTART_INTERVAL = 5000; // ms — at least 5s between restarts
+  const MIN_RESTART_INTERVAL = 5000;
+  const accumulatedTextRef = useRef("");
 
-  // Keep refs current on every render
+  // Keep refs current
   useEffect(() => { onCommandRef.current = onCommand; }, [onCommand]);
   useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
 
   // ── Process a final transcript ───────────────────────────────────────────
-  function processFinal(text: string) {
+  const processFinal = useCallback((text: string) => {
     setLastFired(text);
-    const { grade, subject } = parseCommand(text);
-    const trigger = hasTrigger(text);
+    const parsed = parseVoiceCommand(text);
+    const { grade, subject, chapter } = parsed;
 
-    const shouldFire =
-      (grade !== null && subject !== null) ||          // "class 10 physics" — no trigger needed
-      (trigger && grade !== null) ||                   // "open class 9"
-      (trigger && subject !== null);                   // "pull up physics"
+    const shouldFire = grade !== null && subject !== null;
 
     if (shouldFire) {
       const query = [grade ? `class ${grade}` : "", subject ?? ""].filter(Boolean).join(" ");
-      onCommandRef.current({ type: "open_book", query, raw: text });
+      onCommandRef.current({
+        type: "open_book",
+        query,
+        raw: text,
+        chapter,
+      });
       setLiveText("");
+      setRecognizedWords([]);
     } else {
       onTranscriptRef.current?.(text);
     }
+  }, []);
+
+  // ── Start Deepgram WebSocket ─────────────────────────────────────────────
+  function startDeepgram() {
+    if (!DEEPGRAM_API_KEY) {
+      // Fall back to browser SpeechRecognition
+      startBrowserRecognition();
+      return;
+    }
+
+    try {
+      const ws = new WebSocket(
+        `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&language=en-IN&interim_results=true&endpointing=200&utterance_end_ms=1000`
+      );
+
+      ws.onopen = () => {
+        setIsListening(true);
+        setStatusType("on");
+        setStatusMsg("Listening…");
+        accumulatedTextRef.current = "";
+
+        // Start recording from microphone
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then((stream) => {
+            const mediaRecorder = new MediaRecorder(stream, {
+              mimeType: "audio/webm;codecs=opus",
+            });
+            mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                ws.send(event.data);
+              }
+            };
+            mediaRecorder.start(250); // send chunks every 250ms
+
+            // Store refs for cleanup
+            (ws as any)._mediaRecorder = mediaRecorder;
+            (ws as any)._stream = stream;
+          })
+          .catch((err) => {
+            console.error("[voice] mic error:", err);
+            setStatusType("error");
+            setStatusMsg("Mic access denied");
+            ws.close();
+          });
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "Results" && data.channel?.alternatives?.[0]) {
+            const transcript = data.channel.alternatives[0].transcript;
+            const isFinal = data.is_final;
+
+            if (transcript) {
+              setLiveText(transcript);
+
+              // Update rolling word window
+              const words = transcript.split(/\s+/).filter(Boolean);
+              setRecognizedWords((prev) => {
+                const combined = [...prev, ...words];
+                // Keep last 20 words
+                return combined.slice(-20);
+              });
+
+              if (isFinal) {
+                accumulatedTextRef.current += " " + transcript;
+                processFinal(accumulatedTextRef.current.trim());
+                accumulatedTextRef.current = "";
+              }
+            }
+          }
+        } catch (e) {
+          // ignore parse errors
+        }
+      };
+
+      ws.onerror = () => {
+        // Fall back to browser recognition
+        startBrowserRecognition();
+      };
+
+      ws.onclose = () => {
+        setIsListening(false);
+        // Clean up media resources
+        try { (ws as any)._mediaRecorder?.stop(); } catch (_) {}
+        try { (ws as any)._stream?.getTracks().forEach((t: MediaStreamTrack) => t.stop()); } catch (_) {}
+
+        if (wantListeningRef.current) {
+          const now = Date.now();
+          const timeSinceLastRestart = now - lastRestartTimeRef.current;
+          if (timeSinceLastRestart < MIN_RESTART_INTERVAL) {
+            const waitTime = MIN_RESTART_INTERVAL - timeSinceLastRestart;
+            setStatusMsg(`Waiting ${Math.ceil(waitTime / 1000)}s…`);
+            setTimeout(() => {
+              if (wantListeningRef.current) {
+                lastRestartTimeRef.current = Date.now();
+                startDeepgram();
+              }
+            }, waitTime);
+          } else {
+            setStatusMsg("Restarting…");
+            lastRestartTimeRef.current = now;
+            setTimeout(() => {
+              if (wantListeningRef.current) startDeepgram();
+            }, 300);
+          }
+        } else {
+          setStatusType("idle");
+          setStatusMsg("Voice off");
+        }
+      };
+
+      wsRef.current = ws;
+    } catch (err) {
+      // Fall back to browser recognition
+      startBrowserRecognition();
+    }
   }
 
-  // ── Build & start a fresh SpeechRecognition instance ─────────────────────
-  function startRecognition() {
+  // ── Browser SpeechRecognition fallback ───────────────────────────────────
+  function startBrowserRecognition() {
     if (typeof window === "undefined") return;
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
@@ -187,7 +206,6 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
       return;
     }
 
-    // Tear down any existing instance first
     if (recRef.current) {
       try { recRef.current.abort(); } catch (_) {}
       recRef.current = null;
@@ -197,20 +215,18 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "en-IN";
-    rec.maxAlternatives = 3; // get more alternatives for better accuracy
+    rec.maxAlternatives = 3;
 
     rec.onstart = () => {
       setIsListening(true);
       setStatusType("on");
       setStatusMsg("Listening…");
+      accumulatedTextRef.current = "";
     };
 
     rec.onresult = (e: any) => {
-      // Collect all results from this event — take the latest one
       const resultList: SpeechRecognitionResultList = e.results;
       const last = resultList[resultList.length - 1];
-
-      // Pick best alternative (highest confidence)
       let bestText = last[0].transcript;
       let bestConf = last[0].confidence ?? 0;
       for (let i = 1; i < last.length; i++) {
@@ -222,9 +238,17 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
 
       setLiveText(bestText);
 
+      // Update rolling word window
+      const words = bestText.split(/\s+/).filter(Boolean);
+      setRecognizedWords((prev) => {
+        const combined = [...prev, ...words];
+        return combined.slice(-20);
+      });
+
       if (last.isFinal) {
-        setLiveText("");
-        processFinal(bestText);
+        accumulatedTextRef.current += " " + bestText;
+        processFinal(accumulatedTextRef.current.trim());
+        accumulatedTextRef.current = "";
       }
     };
 
@@ -236,31 +260,27 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
         setIsListening(false);
         return;
       }
-      // "no-speech", "audio-capture", "network" — all recoverable; onend will restart
     };
 
     rec.onend = () => {
       setIsListening(false);
-      // Auto-restart only if we still want to be listening
       if (wantListeningRef.current) {
         const now = Date.now();
         const timeSinceLastRestart = now - lastRestartTimeRef.current;
-
         if (timeSinceLastRestart < MIN_RESTART_INTERVAL) {
-          // Debounce: don't restart yet — wait until minimum interval has passed
           const waitTime = MIN_RESTART_INTERVAL - timeSinceLastRestart;
           setStatusMsg(`Waiting ${Math.ceil(waitTime / 1000)}s…`);
           setTimeout(() => {
             if (wantListeningRef.current) {
               lastRestartTimeRef.current = Date.now();
-              startRecognition();
+              startBrowserRecognition();
             }
           }, waitTime);
         } else {
           setStatusMsg("Restarting…");
           lastRestartTimeRef.current = now;
           setTimeout(() => {
-            if (wantListeningRef.current) startRecognition();
+            if (wantListeningRef.current) startBrowserRecognition();
           }, 300);
         }
       } else {
@@ -273,7 +293,6 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
     try {
       rec.start();
     } catch (err: any) {
-      // InvalidStateError — already started; ignore
       if (!err.message?.includes("already started")) {
         setStatusType("error");
         setStatusMsg("Could not start mic");
@@ -283,12 +302,24 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
 
   function stopRecognition() {
     wantListeningRef.current = false;
+    // Close Deepgram WebSocket
+    if (wsRef.current) {
+      try {
+        (wsRef.current as any)._mediaRecorder?.stop();
+        (wsRef.current as any)._stream?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+        wsRef.current.close();
+      } catch (_) {}
+      wsRef.current = null;
+    }
+    // Stop browser recognition
     try { recRef.current?.stop(); } catch (_) {}
     recRef.current = null;
     setIsListening(false);
     setStatusType("idle");
     setStatusMsg("Voice off");
     setLiveText("");
+    setRecognizedWords([]);
+    accumulatedTextRef.current = "";
   }
 
   function toggle() {
@@ -296,8 +327,8 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
       stopRecognition();
     } else {
       wantListeningRef.current = true;
-      lastRestartTimeRef.current = 0; // reset debounce
-      startRecognition();
+      lastRestartTimeRef.current = 0;
+      startDeepgram(); // tries Deepgram first, falls back to browser
     }
   }
 
@@ -305,8 +336,8 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
   useEffect(() => {
     if (active && !wantListeningRef.current) {
       wantListeningRef.current = true;
-      lastRestartTimeRef.current = 0; // reset debounce
-      startRecognition();
+      lastRestartTimeRef.current = 0;
+      startDeepgram();
     }
     if (!active && wantListeningRef.current) {
       stopRecognition();
@@ -317,6 +348,13 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
   // Cleanup on unmount
   useEffect(() => () => {
     wantListeningRef.current = false;
+    if (wsRef.current) {
+      try {
+        (wsRef.current as any)._mediaRecorder?.stop();
+        (wsRef.current as any)._stream?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+        wsRef.current.close();
+      } catch (_) {}
+    }
     try { recRef.current?.abort(); } catch (_) {}
   }, []);
 
@@ -328,51 +366,81 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
     : "bg-slate-600";
 
   return (
-    <div className="flex items-center gap-3">
-      {/* Mic button */}
-      <button
-        onClick={toggle}
-        disabled={statusType === "bad-browser"}
-        title={isListening ? "Stop voice commands" : "Start voice commands"}
-        className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-2xl border transition-all
-          ${statusType === "on"
-            ? "border-green-500/40 bg-green-500/10 text-green-400"
-            : statusType === "error"
-            ? "border-red-500/40 bg-red-500/10 text-red-400"
-            : "border-slate-700 bg-slate-800 text-slate-400 hover:border-indigo-500/40 hover:text-indigo-300"
-          }`}
-      >
-        {isListening && (
-          <span className="absolute inset-0 rounded-2xl border border-green-500/40 animate-ping opacity-25 pointer-events-none" />
-        )}
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z"/>
-        </svg>
-      </button>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        {/* Mic button */}
+        <button
+          onClick={toggle}
+          disabled={statusType === "bad-browser"}
+          title={isListening ? "Stop voice commands" : "Start voice commands"}
+          className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-2xl border transition-all
+            ${statusType === "on"
+              ? "border-green-500/40 bg-green-500/10 text-green-400"
+              : statusType === "error"
+              ? "border-red-500/40 bg-red-500/10 text-red-400"
+              : "border-slate-700 bg-slate-800 text-slate-400 hover:border-indigo-500/40 hover:text-indigo-300"
+            }`}
+        >
+          {isListening && (
+            <span className="absolute inset-0 rounded-2xl border border-green-500/40 animate-ping opacity-25 pointer-events-none" />
+          )}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[18px] h-[18px]">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z"/>
+          </svg>
+        </button>
 
-      {/* Status */}
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1 overflow-hidden">
-        <div className="flex items-center gap-1.5">
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass}`} />
-          <span className="text-[11px] font-medium text-slate-400 truncate">{statusMsg}</span>
+        {/* Status */}
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1 overflow-hidden">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass}`} />
+            <span className="text-[11px] font-medium text-slate-400 truncate">{statusMsg}</span>
+          </div>
+
+          {/* Live interim transcript */}
+          {liveText && (
+            <p className="text-[10px] text-slate-500 truncate italic">"{liveText}"</p>
+          )}
+
+          {/* Last successfully fired command */}
+          {!liveText && lastFired && (
+            <p className="text-[10px] text-green-400/70 truncate">✓ {lastFired}</p>
+          )}
+
+          {/* Helper hint when off */}
+          {statusType === "idle" && !liveText && !lastFired && (
+            <p className="text-[10px] text-slate-600 truncate">Say "open class 10 science"</p>
+          )}
         </div>
-
-        {/* Live interim transcript */}
-        {liveText && (
-          <p className="text-[10px] text-slate-500 truncate italic">"{liveText}"</p>
-        )}
-
-        {/* Last successfully fired command */}
-        {!liveText && lastFired && (
-          <p className="text-[10px] text-green-400/70 truncate">✓ {lastFired}</p>
-        )}
-
-        {/* Helper hint when off */}
-        {statusType === "idle" && !liveText && !lastFired && (
-          <p className="text-[10px] text-slate-600 truncate">Say "open class 10 science"</p>
-        )}
       </div>
+
+      {/* Recognized words display */}
+      {recognizedWords.length > 0 && (
+        <div className="flex flex-wrap gap-1 px-1">
+          {recognizedWords.map((word, i) => {
+            const lower = word.toLowerCase();
+            const isGrade = /^(class|grade|std|twelfth|eleventh|tenth|ninth|eighth|seventh|sixth|fifth|fourth|third|second|first)$/.test(lower) || /^(1[0-2]|[1-9])$/.test(lower);
+            const isSubject = ["physics","chemistry","maths","math","mathematics","biology","science","english","hindi","sanskrit","history","geography","economics","accountancy","accounts","business","evs","sst","bio","chem","geo","eco"].includes(lower);
+            const isChapter = /^chapter$|^ch$/.test(lower) || /^\d+$/.test(lower);
+            return (
+              <span
+                key={i}
+                className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                  isGrade
+                    ? "bg-indigo-500/20 text-indigo-300"
+                    : isSubject
+                    ? "bg-emerald-500/20 text-emerald-300"
+                    : isChapter
+                    ? "bg-amber-500/20 text-amber-300"
+                    : "bg-slate-800 text-slate-500"
+                }`}
+              >
+                {word}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

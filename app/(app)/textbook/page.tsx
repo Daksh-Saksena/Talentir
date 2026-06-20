@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import TextbookVoiceListener, { type VoiceCommand } from "@/components/TextbookVoiceListener";
 import BoardQuestionsPanel from "@/components/BoardQuestionsPanel";
-import { findTextbook, TEXTBOOKS, type TextbookEntry } from "@/lib/textbook";
+import { findTextbook, TEXTBOOKS, type TextbookEntry, getChapterProxyUrl, chapterPdfUrl } from "@/lib/textbook";
 
 const OPENAI_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? "";
 
@@ -88,6 +88,7 @@ export default function TextbookPage() {
   useAuth(); // ensure auth context is consumed
 
   const [activeBook, setActiveBook] = useState<TextbookEntry | null>(null);
+  const [activeChapter, setActiveChapter] = useState<number>(1);
   const [pdfStage, setPdfStage] = useState<PdfStage>("proxy");
   const [currentSection, setCurrentSection] = useState("");
   const [importantSections, setImportantSections] = useState<ImportantSection[]>([]);
@@ -105,12 +106,14 @@ export default function TextbookPage() {
   };
 
   // ── Open a textbook ──────────────────────────────────────────────────────
-  const openBook = useCallback(async (book: TextbookEntry) => {
+  const openBook = useCallback(async (book: TextbookEntry, chapter?: number | null) => {
+    const ch = chapter ?? 1;
     setActiveBook(book);
+    setActiveChapter(ch);
     setPdfStage("proxy");
     setCurrentSection("");
     setImportantSections([]);
-    notify(`📖 Opening: ${book.title}`);
+    notify(`📖 Opening: ${book.title}${book.hasPdf ? ` — Chapter ${ch}` : ""}`);
 
     setLoadingAnnotations(true);
     const sections = await fetchImportantSections(book);
@@ -118,13 +121,28 @@ export default function TextbookPage() {
     setLoadingAnnotations(false);
   }, []);
 
+  // ── Jump to a specific chapter ──────────────────────────────────────────
+  const goToChapter = useCallback((ch: number) => {
+    if (!activeBook) return;
+    setActiveChapter(ch);
+    setPdfStage("proxy");
+    notify(`Opening Chapter ${ch}`);
+  }, [activeBook]);
+
+  // ── Build the current PDF URL ───────────────────────────────────────────
+  const currentPdfUrl = activeBook
+    ? activeBook.hasPdf
+      ? getChapterProxyUrl(activeBook, activeChapter)
+      : activeBook.pdfUrl // HTML viewer for grades 1-8
+    : "";
+
   // ── Voice command handler ────────────────────────────────────────────────
   const handleVoiceCommand = useCallback(
     (cmd: VoiceCommand) => {
       if (cmd.type === "open_book") {
         const book = findTextbook(cmd.query);
         if (book) {
-          openBook(book);
+          openBook(book, cmd.chapter);
         } else {
           notify(`❓ No match for "${cmd.query}". Try "Class 10 Science" or "Class 12 Physics".`);
         }
@@ -167,11 +185,6 @@ export default function TextbookPage() {
   }, []);
 
   const gradeGroups = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
-  // Build the right URL for the current stage
-  const proxyUrl = activeBook
-    ? `/api/pdf-proxy?url=${encodeURIComponent(activeBook.pdfUrl)}`
-    : "";
 
   return (
     <div className="flex h-[calc(100vh-80px)] overflow-hidden relative">
@@ -245,7 +258,7 @@ export default function TextbookPage() {
                 grade={grade}
                 books={books}
                 activeBook={activeBook}
-                onOpen={openBook}
+                onOpen={(b) => openBook(b)}
               />
             );
           })}
@@ -304,6 +317,25 @@ export default function TextbookPage() {
               </p>
               <h2 className="text-sm font-semibold text-white truncate">{activeBook.title}</h2>
             </div>
+
+            {/* Chapter selector — only for grades 9-12 with PDFs */}
+            {activeBook.hasPdf && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[10px] text-slate-500 mr-1">Ch:</span>
+                <select
+                  value={activeChapter}
+                  onChange={(e) => goToChapter(Number(e.target.value))}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500/50"
+                >
+                  {Array.from({ length: activeBook.chapters }, (_, i) => i + 1).map((ch) => (
+                    <option key={ch} value={ch}>
+                      Chapter {ch}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {activeBook.hasBoardPapers && (
               <span className="shrink-0 px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 text-[10px] font-bold border border-rose-500/20">
                 BOARD EXAM
@@ -320,8 +352,9 @@ export default function TextbookPage() {
                 fallback mode
               </span>
             )}
+            {/* Open directly link — use raw NCERT URL for PDFs */}
             <a
-              href={activeBook.pdfUrl}
+              href={activeBook.hasPdf ? chapterPdfUrl(activeBook.code, activeChapter) : activeBook.pdfUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="shrink-0 text-xs text-slate-500 hover:text-white transition px-2 py-1 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700"
@@ -336,11 +369,11 @@ export default function TextbookPage() {
           <EmptyState onVoice={() => setVoiceActive(true)} />
         ) : pdfStage === "proxy" ? (
           <iframe
-            key={`proxy-${activeBook.pdfUrl}`}
-            src={proxyUrl}
+            key={`proxy-${activeBook.code}-${activeChapter}`}
+            src={currentPdfUrl}
             className="flex-1 w-full border-0"
             style={{ height: "100%" }}
-            title={activeBook.title}
+            title={`${activeBook.title} — Chapter ${activeChapter}`}
             allow="fullscreen"
             onError={() => {
               console.warn("[textbook] proxy iframe failed, trying <object>");
@@ -349,8 +382,8 @@ export default function TextbookPage() {
           />
         ) : pdfStage === "object" ? (
           <object
-            key={`object-${activeBook.pdfUrl}`}
-            data={activeBook.pdfUrl}
+            key={`object-${activeBook.code}-${activeChapter}`}
+            data={activeBook.hasPdf ? chapterPdfUrl(activeBook.code, activeChapter) : activeBook.pdfUrl}
             type="application/pdf"
             className="flex-1 w-full"
             style={{ height: "100%" }}
@@ -359,11 +392,18 @@ export default function TextbookPage() {
               setPdfStage("failed");
             }}
           >
-            {/* Fallback if object tag not supported */}
-            <PDFFailed book={activeBook} onRetry={() => setPdfStage("proxy")} />
+            <PDFFailed
+              book={activeBook}
+              chapter={activeChapter}
+              onRetry={() => setPdfStage("proxy")}
+            />
           </object>
         ) : (
-          <PDFFailed book={activeBook} onRetry={() => setPdfStage("proxy")} />
+          <PDFFailed
+            book={activeBook}
+            chapter={activeChapter}
+            onRetry={() => setPdfStage("proxy")}
+          />
         )}
       </main>
 
@@ -412,10 +452,10 @@ function GradeAccordion({
       {open && (
         <div className="ml-2 mt-0.5 space-y-0.5">
           {books.map((b) => {
-            const isActive = activeBook?.pdfUrl === b.pdfUrl;
+            const isActive = activeBook?.code === b.code;
             return (
               <button
-                key={b.pdfUrl}
+                key={b.code}
                 onClick={() => onOpen(b)}
                 className={`w-full text-left px-3 py-2 rounded-lg text-xs transition flex items-center gap-2 ${
                   isActive
@@ -454,7 +494,7 @@ function EmptyState({ onVoice }: { onVoice: () => void }) {
       </div>
       <div className="bg-slate-900 border border-slate-800 rounded-2xl px-6 py-4 text-left max-w-sm w-full space-y-2">
         <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Voice examples:</p>
-        {["Pull up Class 10 Science", "Open Class 12 Physics", "Show Class 9 Maths", "Load Class 6 English"].map((ex) => (
+        {["Open Class 12 Physics Chapter 3", "Show Class 10 Science Chapter 5", "Pull up Class 9 Maths", "Load Class 6 English"].map((ex) => (
           <p key={ex} className="text-sm text-slate-300 flex items-center gap-2">
             <span className="text-indigo-400 text-base">🎙</span>
             <span>"{ex}"</span>
@@ -472,7 +512,7 @@ function EmptyState({ onVoice }: { onVoice: () => void }) {
 }
 
 // ── PDF failed state ──────────────────────────────────────────────────────────
-function PDFFailed({ book, onRetry }: { book: TextbookEntry; onRetry: () => void }) {
+function PDFFailed({ book, chapter, onRetry }: { book: TextbookEntry; chapter?: number; onRetry: () => void }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="text-5xl">📄</div>
@@ -489,7 +529,7 @@ function PDFFailed({ book, onRetry }: { book: TextbookEntry; onRetry: () => void
           ↻ Retry
         </button>
         <a
-          href={book.pdfUrl}
+          href={book.hasPdf && chapter ? chapterPdfUrl(book.code, chapter) : book.pdfUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition shadow-md shadow-indigo-500/20"
