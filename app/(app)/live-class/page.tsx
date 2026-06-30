@@ -54,6 +54,111 @@ const SIMS: Record<string, string> = {
   'gravity-space':'gravity-force-lab-basics','plate-tectonics':'plate-tectonics',
 };
 
+// CBSE Grade 11 Accountancy — curated topic → ideal image search key mapping
+const ACCOUNTING_VISUALS: Record<string, string> = {
+  // Ch 1 — Introduction to Accounting
+  'accounting introduction':      'accounting introduction infographic business',
+  'users of accounting':          'users of accounting information stakeholders chart',
+  'qualitative characteristics':  'qualitative characteristics accounting information diagram',
+  'accounting objectives':        'objectives of accounting infographic',
+  // Ch 2 — Basic Accounting Terms
+  'business entity':              'business entity concept accounting diagram',
+  'assets liabilities capital':   'assets liabilities capital accounting equation chart',
+  'debtors creditors':            'debtors creditors accounts receivable payable diagram',
+  'revenue expenses':             'revenue expenses profit loss accounting infographic',
+  'trade discount cash discount': 'trade discount cash discount difference table',
+  'voucher source document':      'accounting voucher source document types infographic',
+  'goods stock inventory':        'goods stock inventory accounting diagram',
+  // Ch 3 — Theory Base of Accounting
+  'accounting concepts':          'fundamental accounting concepts conventions chart',
+  'going concern':                'going concern concept accounting diagram',
+  'accrual basis':                'accrual basis cash basis accounting comparison',
+  'matching concept':             'matching concept revenue expenses accounting',
+  'dual aspect':                  'dual aspect concept double entry system diagram',
+  'money measurement':            'money measurement concept accounting limitation',
+  'conservatism':                 'conservatism concept prudence accounting',
+  'consistency':                  'consistency principle accounting standards',
+  'accounting standards':         'accounting standards GAAP India infographic',
+  'gst':                          'GST goods services tax India chart explanation',
+  // Ch 4 — Accounting Equation
+  'accounting equation':          'accounting equation assets liabilities capital diagram',
+  // Ch 5 — Journal
+  'journal':                      'accounting journal entry format ledger book',
+  'journal entry':                'accounting journal entry debit credit format',
+  'debit credit rules':           'debit credit rules accounting golden rules chart',
+  'golden rules':                 'golden rules of accounting debit credit chart',
+  'double entry':                 'double entry bookkeeping system diagram',
+  // Ch 6 — Ledger
+  'ledger':                       'ledger account T account format accounting',
+  'ledger posting':               'ledger posting from journal to ledger diagram',
+  'balancing ledger':             'balancing ledger accounts closing balance',
+  // Ch 7 — Special Purpose Books
+  'cash book':                    'cash book format single column double column accounting',
+  'petty cash book':              'petty cash book format imprest system accounting',
+  'purchase book':                'purchases book format accounting daybook',
+  'sales book':                   'sales book format accounting daybook',
+  'purchase return book':         'purchase returns book format accounting',
+  'sales return book':            'sales returns book format accounting',
+  'special purpose books':        'special purpose subsidiary books accounting diagram',
+  // Ch 8 — Bank Reconciliation Statement
+  'bank reconciliation':          'bank reconciliation statement format BRS',
+  'brs':                          'bank reconciliation statement passbook cashbook difference',
+  'passbook':                     'bank passbook account statement format',
+  'bank statement':               'bank statement reconciliation accounting format',
+  'unpresented cheque':           'bank reconciliation outstanding cheque passbook diagram',
+  // Ch 9 — Trial Balance
+  'trial balance':                'trial balance format debit credit accountancy',
+  'errors trial balance':         'errors in trial balance classification accounting',
+  'suspense account':             'suspense account rectification errors accounting',
+  // Ch 10 — Rectification of Errors
+  'rectification errors':         'rectification of errors accounting journal entry',
+  'errors of omission':           'errors of omission commission accounting types',
+  'compensating errors':          'compensating errors accounting explanation',
+  // Ch 11 — Depreciation
+  'depreciation':                 'depreciation concept fixed asset accounting diagram',
+  'straight line method':         'straight line method depreciation graph chart',
+  'slm depreciation':             'straight line depreciation SLM formula chart accountancy',
+  'written down value':           'written down value WDV depreciation declining chart',
+  'wdv depreciation':             'WDV written down value depreciation method comparison',
+  'depreciation methods':         'SLM WDV depreciation methods comparison chart',
+  'causes of depreciation':       'causes of depreciation wear tear obsolescence diagram',
+  // Ch 12 — Provisions and Reserves
+  'provisions':                   'provisions reserves accounting difference diagram',
+  'reserves':                     'reserves types revenue capital accounting chart',
+  'provision bad debts':          'provision for bad debts doubtful debts accounting',
+  'general reserve':              'general reserve capital reserve specific reserve diagram',
+  // Ch 13 — Bills of Exchange
+  'bill of exchange':             'bill of exchange format drawer drawee payee accounting',
+  'promissory note':              'promissory note format accounting negotiable instrument',
+  // Ch 14 — Financial Statements
+  'trading account':              'trading account format gross profit accounting',
+  'profit loss account':          'profit and loss account format net profit accounting',
+  'balance sheet':                'balance sheet format assets liabilities T account',
+  'financial statements':         'financial statements income statement balance sheet diagram',
+  'gross profit':                 'gross profit calculation formula accounting',
+  'net profit':                   'net profit calculation operating expenses accounting',
+  'working capital':              'working capital current assets liabilities accounting',
+  'adjustments':                  'adjustments in final accounts prepaid accrued accounting',
+  'prepaid expenses':             'prepaid expenses outstanding accrued accounting adjustment',
+  'accrued income':               'accrued income unearned revenue accounting adjustment',
+  'closing stock':                'closing stock trading account adjustment accounting',
+};
+
+// Accounting formula library — used by the formula card renderer
+const ACCOUNTING_FORMULAS: Record<string, { label: string; formula: string; note: string }> = {
+  'accounting equation':  { label: 'Accounting Equation',        formula: 'Assets = Liabilities + Capital',                         note: 'The foundation of double-entry bookkeeping' },
+  'slm depreciation':     { label: 'Straight Line Method (SLM)', formula: 'Depreciation = (Cost \u2212 Scrap Value) \u00f7 Useful Life',      note: 'Equal charge every year on original cost' },
+  'wdv depreciation':     { label: 'Written Down Value (WDV)',    formula: 'Depreciation = Book Value \u00d7 Rate %',                       note: 'Charge declines each year as book value reduces' },
+  'gross profit':         { label: 'Gross Profit',               formula: 'GP = Net Sales \u2212 Cost of Goods Sold',                     note: 'COGS = Opening Stock + Purchases \u2212 Closing Stock' },
+  'net profit':           { label: 'Net Profit',                 formula: 'NP = Gross Profit \u2212 Operating Expenses',                 note: 'Operating expenses: wages, rent, admin costs' },
+  'working capital':      { label: 'Working Capital',            formula: 'WC = Current Assets \u2212 Current Liabilities',              note: 'Measures short-term financial health' },
+  'current ratio':        { label: 'Current Ratio',              formula: 'Current Ratio = Current Assets \u00f7 Current Liabilities',   note: 'Ideal ratio is 2:1' },
+  'cost of goods sold':   { label: 'Cost of Goods Sold (COGS)',  formula: 'COGS = Opening Stock + Net Purchases \u2212 Closing Stock',  note: 'Used in the Trading Account' },
+  'rate of depreciation': { label: 'Rate of Depreciation',       formula: 'Rate = (Annual Depreciation \u00f7 Original Cost) \u00d7 100',    note: 'Expressed as a percentage per annum' },
+  'trade discount':       { label: 'Trade Discount',             formula: 'Net Price = List Price \u2212 Trade Discount',                note: 'Not recorded in books; deducted before journalising' },
+  'capital':              { label: 'Capital Formula',            formula: 'Capital = Assets \u2212 Liabilities',                        note: "Owner's equity or proprietor's fund" },
+};
+
 interface Student {
   name: string; status: "present" | "absent" | "pending";
 }
@@ -87,10 +192,12 @@ export default function LiveClassPage() {
   const [topic, setTopic] = useState("Ready to Start");
   const [summary, setSummary] = useState("Listening for lecture points...");
   const [todos, setTodos] = useState<string[]>([]);
+  const todosRef = useRef<string[]>([]);
+  todosRef.current = todos;
+  const [liveTranscript, setLiveTranscript] = useState<string[]>([]);
   
   // QUIZ, Q&A, ADHD
   const [quiz, setQuiz] = useState<{q: string, options: string[], answer: number} | null>(null);
-  const [qaAnswer, setQaAnswer] = useState<string | null>(null);
   const [calmMode, setCalmMode] = useState(false);
   
   // ATTENTION & PARTICIPATION
@@ -121,7 +228,6 @@ export default function LiveClassPage() {
   ]);
   
   const transcriptBuffer = useRef<string[]>([]);
-  const questionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -348,6 +454,11 @@ export default function LiveClassPage() {
 
   const processTranscript = (cleaned: string) => {
     console.log("%c[Speech Heard]:", "color: #a855f7; font-weight: bold;", cleaned);
+    setLiveTranscript(prev => {
+      const updated = [...prev, cleaned];
+      if (updated.length > 5) updated.shift();
+      return updated;
+    });
     const currentIndex = attendanceIndexRef.current;
     if (cleaned.includes("space") || cleaned.includes("star") || cleaned.includes("galaxy")) setMood("space");
     else if (cleaned.includes("ocean") || cleaned.includes("water") || cleaned.includes("sea")) setMood("ocean");
@@ -376,18 +487,7 @@ export default function LiveClassPage() {
     if (cleaned.includes("calm mode") || cleaned.includes("calming") || cleaned.includes("focus mode") || cleaned.includes("breathe")) {
       setCalmMode(prev => !prev); return;
     }
-    // Smarter question detection with "Patience Timer"
-    if (cleaned.includes("question") || cleaned.includes("explain") || cleaned.includes("why is") || cleaned.includes("what is") || cleaned.includes("how does") || cleaned.includes("tell me")) {
-      if (!isSpeakingRef.current && !showAttendance && !quiz) {
-        if (questionTimeoutRef.current) clearTimeout(questionTimeoutRef.current);
-        questionTimeoutRef.current = setTimeout(() => {
-           // Use the last 2 segments for full context
-           const fullQuestion = transcriptBuffer.current.slice(-2).join(" ");
-           answerQuestion(fullQuestion || cleaned);
-        }, 1500); // 1.5s silence before answering
-        return;
-      }
-    }
+
     // Track participation from speech
     if (currentIndex === -1) {
       // Heuristic: if we're in a normal (non-attendance) mode, attribute speech to "Teacher" or detect student name mentions
@@ -470,6 +570,7 @@ export default function LiveClassPage() {
       // Reset
       studentStatsRef.current = {};
       setIsListening(false); stopEngines(); if (document.fullscreenElement) document.exitFullscreen();
+      setLiveTranscript([]);
     } else {
       if (!apiKey) return;
       const elem = document.documentElement as any;
@@ -477,6 +578,7 @@ export default function LiveClassPage() {
       sessionStartRef.current = Date.now();
       studentStatsRef.current = {};
       setIsListening(true); startDeepgram();
+      setLiveTranscript([]);
     }
   };
 
@@ -494,19 +596,7 @@ export default function LiveClassPage() {
     } catch(e) {}
   };
 
-  const answerQuestion = async (question: string) => {
-    try {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: `Student asked: "${question}". Context: "${transcriptBuffer.current.join(' ')}". Give a clear, concise answer in 2 sentences. Reply JSON: {"answer":"string"}` }], response_format: { type: 'json_object' } })
-      });
-      const d = await r.json();
-      const a = JSON.parse(d.choices[0].message.content);
-      setQaAnswer(a.answer);
-      speak(a.answer);
-      setTimeout(() => setQaAnswer(null), 15000);
-    } catch(e) {}
-  };
+
 
   const manualSync = () => handleHeardSpeech("MANUAL_SYNC_TRIGGER");
 
@@ -530,38 +620,59 @@ export default function LiveClassPage() {
     setThinking("AI Thinking...");
     try {
       const simKeys = Object.keys(SIMS).join(', ');
-      const prompt = `Transcript: "${context}". You are a proactive classroom visual assistant. Choose the BEST visual aid.
-      RULES:
-      - "type" must be one of: "sim" | "gif" | "image" | "formula" | "none".
-      - Use "none" if the transcript contains only greetings, small talk, administrative chat, classroom management instructions (e.g. "hello guys", "lets start class in a minute", "sit down", "listen up"), or if no visual aid is useful for the content.
-      - Use "sim" ONLY if the topic exactly matches one of these PhET simulation keys: [${simKeys}]. Set "key" to the matching key from the list.
-      - Use "gif" for dynamic processes: chemical reactions, cell division, wave motion, orbits, water cycles, etc.
-      - Use "image" for concepts, places, diagrams, portraits, structures, charts.
-      - Use "formula" for equations and mathematical expressions.
-      - "key" for "gif" and "image" must be a short, specific, high-quality image search term (2-4 words max, e.g. "chemical bonding", "human heart", "solar system", "mitosis cell division").
-      - Change the visual whenever the subtopic shifts, even within the same lesson.
-      - Extract explicit tasks/todos mentioned in the transcript into the "homework" array ONLY if the teacher explicitly commands or assigns them as NEW future requirements (e.g. "Bring your notebooks tomorrow", "Finish this for homework").
-      - CRITICAL: Do NOT extract past, completed, or already assigned tasks that the teacher is just reviewing, checking, referencing, or discussing as something that was already done (e.g. "I hope you completed yesterday's HW", "We checked the exercises", "I'm hoping you completed your homework from last class which was doing exercise 5 and 6", "yesterday's homework was exercise 6 and 7", "i hope you finished your linear equation homework", "you will exercise three and four"). Only extract newly assigned tasks.
-      - If the teacher references past homework/exercises and says "make sure to focus", "catch up", or "you need to complete" in the context of catching up on old/previous work, do NOT count it as a new homework/todo.
-      - Do NOT assume, infer, or invent any tasks/todos. If the teacher does not explicitly assign a task, the "homework" array must be empty.
-      - Formatting rules: Prefix a task with "(HW) " ONLY if the teacher explicitly refers to it as homework or HW (e.g. "This is your homework", "Homework is questions 1-5"). For other explicit tasks (e.g. "Bring your notebooks tomorrow", "Finish this tonight"), do not add the "(HW) " prefix.
-      
-      EXAMPLES:
-      1. Transcript: "Good morning class. I'm hoping you completed your homework from last class which was doing exercise five and six. Okay. Now let's continue on."
-         Output: {"topic":"Intro","summary":"Starting the class.","homework":[],"type":"none","key":"","caption":""}
-         (Explanation: "exercise five and six" is referred to as "homework from last class which was", so it is past homework and must not be extracted).
-      
-      2. Transcript: "We will study chemical bonding today. For homework, do page 193 questions 1 to 5. Also bring your textbook tomorrow."
-         Output: {"topic":"Chemical Bonding","summary":"Beginning study of chemical bonding.","homework":["(HW) Do page 193 questions 1 to 5", "Bring your textbook tomorrow"],"type":"image","key":"chemical bonding","caption":"An illustration of chemical bonding."}
-         (Explanation: Page 193 is explicitly assigned as new homework today, and bringing textbooks is an explicit command for tomorrow).
-      
-      3. Transcript: "Yesterday's homework was exercise six and seven. So today's homework will be on page 193."
-         Output: {"topic":"Classwork","summary":"Reviewing past work and assigning new homework.","homework":["(HW) Homework on page 193"],"type":"none","key":"","caption":""}
-         (Explanation: Exercise 6 and 7 is yesterday's homework, so it is ignored. Page 193 is today's homework, so it is prefixed with (HW) and extracted).
+      // Build accountancy visuals reference string for prompt injection
+      const accountingVisualsRef = Object.entries(ACCOUNTING_VISUALS)
+        .map(([k, v]) => `"${k}" -> search "${v}"`).join('\n       ');
+      const accountingFormulasRef = Object.entries(ACCOUNTING_FORMULAS)
+        .map(([k, v]) => `"${k}" -> formula "${v.formula}" (${v.label})`).join('\n       ');
 
-      4. Transcript: "hello, guys. i hope you finished your linear equation homework. you will exercise three and four. so, okay. it seems you need to complete exercises. but is it harder? make sure to focus on your linear equations to catch up."
-         Output: {"topic":"Linear Equations","summary":"Greeting the class and discussing linear equations homework catch-up.","homework":[],"type":"none","key":"","caption":""}
-         (Explanation: "finished your linear equation homework" and "exercise three and four" refer to catching up on past homework, so no new homework/todo is created).
+      const prompt = `Transcript: "${context}". Current Todo List: ${JSON.stringify(todosRef.current)}.
+
+      You are an expert visual teaching assistant in a CBSE Grade 11 Accountancy classroom in India.
+      The class is already several months into the syllabus. DO NOT show generic introductory chapter cover images unless the teacher is explicitly revising fundamentals.
+      Your job is to act as a dynamic teaching aid that tightly follows the teacher's current explanation at the sentence or paragraph level, focusing on subtopics and specific examples.
+
+      VISUAL TYPE RULES:
+      - "type" must be one of: "sim" | "gif" | "image" | "formula" | "none".
+      - Use "none" ONLY for: pure greetings, roll call, classroom management ("sit down", "quiet", "hello class", "let us begin", "open your books").
+      - Use "sim" ONLY if the topic EXACTLY matches a PhET simulation key: [${simKeys}].
+      - Use "formula" when the teacher explains an accounting equation or formula. Set "key" to the EXACT formula key listed below.
+      - Use "image" for accountancy concepts, formats, diagrams, charts, flowcharts, transaction illustrations, T-accounts, and balance sheet layouts.
+
+      IMAGE SEARCH STRATEGY:
+      - Track subtopics and specific examples closely (e.g. "furniture purchase", "bank loan", "inventory valuation", "drawings", "depreciation", "journal entry", "balance sheet").
+      - Prioritize educational diagrams, infographics, textbook figures, transaction illustrations, T-account visuals, and labeled educational graphics over generic photos.
+      - When the teacher explains a specific transaction or concept, generate a highly targeted search key.
+      - Examples of good keys: "furniture purchase journal entry diagram", "bank loan accounting treatment chart", "T-account format example", "balance sheet asset side illustration".
+      - NEVER use a single generic word like "journal", "ledger", "balance" — always append "accounting diagram", "format", "transaction illustration", etc.
+
+      ACCOUNTANCY IMAGE SEARCH MAP (Use as a base reference, but you CAN and SHOULD invent highly specific search terms for subtopics/examples not covered here):
+       ${accountingVisualsRef}
+
+      ACCOUNTING FORMULA KEYS (when type is "formula", set "key" to EXACTLY one of these):
+       ${accountingFormulasRef}
+      If the formula is not in the list, write it out as a clear string like "GP = Net Sales - COGS".
+
+      TODO LIST RULES:
+      - You are given the "Current Todo List" of tasks already assigned this class.
+      - If the teacher adds to an existing task (e.g. previously "Do ex 6.2 Q1-2" and now adds "Q3"), MERGE them into one item.
+      - Do not delete items unless the teacher explicitly cancels them. Return the COMPLETE updated list in "homework".
+      - Extract tasks ONLY if the teacher explicitly assigns them as NEW future requirements.
+      - CRITICAL: Do NOT extract past homework checks (e.g. "I hope you finished...", "last class we did...", "catch up on..."). Only extract newly assigned tasks.
+      - Prefix a task with "(HW) " ONLY if the teacher explicitly calls it homework or HW.
+
+      EXAMPLES:
+      1. Transcript: "For example, if we purchase furniture for 50,000 cash, what happens? Furniture comes in, cash goes out."
+         Output: {"topic":"Furniture Purchase Transaction","summary":"Explaining the accounting treatment of purchasing an asset for cash.","homework":[],"type":"image","key":"furniture purchase journal entry diagram accountancy","caption":"Furniture A/c Dr. to Cash A/c"}
+
+      2. Transcript: "Today we will learn about the accounting equation. Assets equals liabilities plus capital. This is the backbone of all accounting."
+         Output: {"topic":"Accounting Equation","summary":"Introducing the fundamental accounting equation.","homework":[],"type":"formula","key":"accounting equation","caption":"Assets = Liabilities + Capital — the foundation of double-entry bookkeeping"}
+
+      3. Transcript: "Let us look at a T-account for cash. We record all receipts on the debit side and payments on the credit side."
+         Output: {"topic":"Cash T-Account","summary":"Explaining how to record transactions in a Cash T-account.","homework":[],"type":"image","key":"cash T-account format example illustration","caption":"Cash Account in T-format showing debit (receipts) and credit (payments)"}
+
+      4. Transcript: "Good morning class. Open your books to chapter five. Let us begin."
+         Output: {"topic":"Intro","summary":"Starting the class.","homework":[],"type":"none","key":"","caption":""}
 
       Reply ONLY valid JSON: {"topic":"string","summary":"string","homework":["string"],"type":"sim"|"gif"|"image"|"formula"|"none","key":"string","caption":"why this visual helps"}`;
       
@@ -574,7 +685,14 @@ export default function LiveClassPage() {
       
       if (dec.topic) setTopic(dec.topic);
       if (dec.summary) setSummary(dec.summary);
-      if (dec.homework && dec.homework.length > 0) setTodos(prev => Array.from(new Set([...prev, ...dec.homework])));
+      if (dec.homework && Array.isArray(dec.homework)) {
+        const hasCancellation = context.toLowerCase().match(/cancel|remove|clear|scratch|delete|forget|no need to/);
+        if (dec.homework.length === 0 && todosRef.current.length > 0 && !hasCancellation) {
+          // Keep existing todos to protect against LLM forgetfulness
+        } else {
+          setTodos(dec.homework);
+        }
+      }
 
       if (dec.type !== "none") {
           const isDifferentVisual = 
@@ -583,7 +701,7 @@ export default function LiveClassPage() {
             activeMediaRef.current.type !== dec.type;
           
           const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
-          const minGap = isDifferentVisual ? 10000 : 30000;
+          const minGap = isDifferentVisual ? 10000 : 20000;
           const isFirstMedia = !activeMediaRef.current;
           
           if (isFirstMedia || timeSinceLastUpdate >= minGap || isTrigger) {
@@ -802,15 +920,7 @@ export default function LiveClassPage() {
          </div>
       )}
 
-      {/* Q&A ANSWER OVERLAY */}
-      {qaAnswer && (
-         <div className="absolute inset-x-0 bottom-20 z-50 flex justify-center animate-fade-up">
-            <div className="max-w-lg p-8 bg-black/60 backdrop-blur-3xl border border-emerald-500/20 rounded-[40px] shadow-2xl">
-               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-emerald-400 mb-4 block">Answer</span>
-               <p className="text-sm text-white/90 leading-relaxed">{qaAnswer}</p>
-            </div>
-         </div>
-      )}
+
 
       {/* ATTENTION & ENGAGEMENT PANEL — Top Right */}
       {isListening && (
@@ -875,6 +985,25 @@ export default function LiveClassPage() {
         </div>
       )}
 
+      {/* BOTTOM LEFT LIVE TRANSCRIPT PANEL */}
+      {isListening && (
+         <div className="absolute left-6 bottom-20 w-72 z-50 pointer-events-none">
+            <div className="p-6 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[30px] shadow-2xl animate-fade-in flex flex-col gap-3">
+               <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/30">Live Transcript</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+               </div>
+               <div className="max-h-24 overflow-y-auto scrollbar-thin text-xs text-white/70 space-y-1.5 pointer-events-auto leading-relaxed">
+                  {liveTranscript.length > 0 ? liveTranscript.map((line, idx) => (
+                     <p key={idx} className="border-l-2 border-indigo-500/30 pl-2 animate-fade-in">{line}</p>
+                  )) : (
+                     <p className="text-[10px] text-white/20 italic">Awaiting speech...</p>
+                  )}
+               </div>
+            </div>
+         </div>
+      )}
+
       {/* Mic/Sync Status Corner */}
       <div className="absolute bottom-6 left-6 z-30 flex items-center gap-6">
          <div className="relative w-8 h-8 flex items-center justify-center">
@@ -900,7 +1029,46 @@ export default function LiveClassPage() {
                {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
                  <img src={activeMedia.url} key={activeMedia.url} className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" alt="" />
                )}
-               {activeMedia.type === "formula" && ( <div className="p-20 text-center animate-fade-up"> <h2 className="text-7xl font-light tracking-widest text-white/80 drop-shadow-[0_0_30px_rgba(255,255,255,0.2)] font-serif italic">{activeMedia.key}</h2> </div> )}
+               {activeMedia.type === "formula" && (() => {
+                  const fKey = (activeMedia.key || "").toLowerCase().trim();
+                  const fData = ACCOUNTING_FORMULAS[fKey];
+                  const label = fData?.label || "Formula";
+                  const formulaStr = fData?.formula || activeMedia.key || "";
+                  const note = fData?.note || activeMedia.caption || "";
+                  // Split formula string into parts around operators for colour-coding
+                  const parts = formulaStr.split(/(\s*[=÷−+×→]\s*)/);
+                  return (
+                    <div className="flex flex-col items-center justify-center gap-8 animate-fade-up px-16 w-full">
+                      {/* Label chip */}
+                      <div className="px-8 py-2.5 bg-indigo-500/10 border border-indigo-400/20 rounded-full">
+                        <span className="text-[11px] uppercase tracking-[0.5em] font-black text-indigo-400">{label}</span>
+                      </div>
+                      {/* Formula card */}
+                      <div className="w-full max-w-4xl p-14 bg-white/[0.04] backdrop-blur-3xl border border-white/10 rounded-[48px] shadow-[0_0_100px_rgba(99,102,241,0.12)] flex flex-col items-center gap-7">
+                        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center">
+                          {parts.map((part, i) => {
+                            const trimmed = part.trim();
+                            if (!trimmed) return null;
+                            const isOp = /^[=÷−+×→]$/.test(trimmed);
+                            return (
+                              <span key={i} className={isOp
+                                ? "text-5xl text-indigo-400/90 font-thin mx-1"
+                                : i === 0
+                                ? "text-[2.8rem] font-bold text-white leading-tight"
+                                : "text-[2.8rem] font-semibold text-emerald-300/90 leading-tight"
+                              }>{trimmed}</span>
+                            );
+                          })}
+                        </div>
+                        {note && (
+                          <p className="text-sm text-white/35 tracking-wide text-center max-w-xl leading-relaxed mt-1">{note}</p>
+                        )}
+                      </div>
+                      {/* Ambient glow */}
+                      <div className="absolute inset-0 pointer-events-none rounded-full" style={{ background: "radial-gradient(ellipse at 50% 55%, rgba(99,102,241,0.07) 0%, transparent 65%)" }} />
+                    </div>
+                  );
+               })()}
                {/* Caption */}
                {activeMedia.caption && (
                  <div className="absolute bottom-6 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500">
