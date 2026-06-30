@@ -10,9 +10,11 @@
     "sim": "bash ./sim.sh"
   },
   "dependencies": {
+    "konva": "^10.3.0",
     "next": "16.2.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-konva": "^19.2.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

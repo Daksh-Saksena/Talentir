@@ -70,6 +70,7 @@ export default function LiveClassPage() {
   const faceIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const studentStatsRef = useRef<Record<string, { attentionSum: number, attentionCount: number, speakingCount: number, confusionSum: number, boredomSum: number, firstSeen: number, lastSeen: number }>>({});
   const sessionStartRef = useRef<number>(0);
+  const shownImagesRef = useRef<Set<string>>(new Set());
   
   const attendanceIndexRef = useRef(-1);
   const enrolledProfilesRef = useRef<any[]>([]);
@@ -640,12 +641,60 @@ export default function LiveClassPage() {
     try {
       // Use only the most recent transcript segments to stay relevant
       const context = isTrigger ? "" : transcriptBuffer.current.slice(-2).join(" ");
-      const prompt = `Transcript: "${context}". You are a proactive classroom visual assistant.
-      RULES:
-      - ALWAYS set "type" to "image" unless a PhET simulation keyword matches. NEVER return "none" unless the transcript is empty gibberish.
-      - "key" must be a specific, searchable Wikipedia topic (e.g. "Solar System", "Eiffel Tower", "Mitochondria").
-      - Extract topic, summary, and any homework mentioned.
-      Reply JSON: {"topic":"string","summary":"string","homework":["string"],"type":"sim"|"image"|"video"|"formula","key":"specific wikipedia search term","caption":"why this visual helps"}`;
+
+      const STOP_WORDS = new Set([
+      "hello","hi","hey","guys","everyone","class","students",
+      "today","tomorrow","yesterday",
+      "okay","ok","alright","right","well",
+      "so","then","actually","basically",
+      "please","can","could","would","should",
+      "first","second","next","last",
+      "question","answer","chapter","lesson",
+      "learn","learning","study","studying",
+      "look","see","watch","listen",
+      "the","a","an","and","or","of","for",
+      "in","on","at","with","to","from",
+      "is","are","was","were","be","been","being",
+      "have","has","had","do","does","did"
+    ]);
+
+    function extractKeywords(text: string): string[] {
+      return text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter(word => word.length >= 4)
+        .filter(word => !STOP_WORDS.has(word));
+}
+      const keywords = extractKeywords(context);
+
+      if (keywords.length === 0) {
+        console.log("[Talentir] No meaningful topic found");
+        return;
+      }
+
+      const imageTopic = keywords.slice(0, 3).join(" ");
+
+      console.log("[Talentir] Keywords:", extractKeywords);
+      const prompt = `
+      Teacher speech: "${context}"
+
+      Extract the MOST IMPORTANT educational keyword/topic.
+
+      Use this keyword list if available:
+      "${extractKeywords}"
+
+      Reply JSON ONLY:
+
+      {
+        "topic":"string",
+        "summary":"string",
+        "homework":[],
+        "type":"image",
+        "key":"single best keyword/topic for image search",
+        "caption":"short explanation"
+      }
+      `;
       
       const r = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
@@ -691,7 +740,7 @@ export default function LiveClassPage() {
       const res = await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(
           searchQuery
-        )}&gsrlimit=5&prop=pageimages|images&pithumbsize=1200`
+        )}&gsrlimit=20&prop=pageimages|images&pithumbsize=1200`
       , { signal }
       );
       const data = await res.json();
@@ -699,10 +748,29 @@ export default function LiveClassPage() {
       const pages = Object.values(data.query.pages) as any[];
 
       // Prefer pages that already include a thumbnail for speed
-      for (const p of pages) {
-        if (p.thumbnail?.source) return `${p.thumbnail.source}?cb=${Date.now()}`;
+      const thumbnails = pages
+        .filter(p => p.thumbnail?.source)
+        .map(p => p.thumbnail.source);
+
+      // Remove images we've already shown
+      let available = thumbnails.filter(
+        img => !shownImagesRef.current.has(img)
+      );
+
+      // If we've exhausted all available images, start over
+      if (available.length === 0) {
+        shownImagesRef.current.clear();
+        available = thumbnails;
       }
 
+      if (available.length > 0) {
+        const randomThumbnail =
+          available[Math.floor(Math.random() * available.length)];
+
+        shownImagesRef.current.add(randomThumbnail);
+
+        return `${randomThumbnail}?cb=${Date.now()}`;
+      }
       // If animatedOnly requested, try to find a GIF among image lists
       if (animatedOnly) {
         for (const p of pages) {
