@@ -92,13 +92,16 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
   const bucketRef       = useRef("");
   const windowTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const earlyResolveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Window management ─────────────────────────────────────────────────────
   function clearWindow() {
     if (windowTimerRef.current)  clearTimeout(windowTimerRef.current);
     if (countdownIntRef.current) clearInterval(countdownIntRef.current);
+    if (earlyResolveRef.current) clearTimeout(earlyResolveRef.current);
     windowTimerRef.current  = null;
     countdownIntRef.current = null;
+    earlyResolveRef.current = null;
     collectingRef.current   = false;
     bucketRef.current       = "";
     setCollecting(false);
@@ -160,9 +163,12 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
       if (rest) {
         bucketRef.current = rest;
         setCollectedWords(rest.split(/\s+/).filter(Boolean));
-        // Early-resolve if already have grade + subject
+        // Debounced early-resolve — wait 2s after last speech so chapter can arrive
         const { grade, subject } = parseVoiceCommand(bucketRef.current);
-        if (grade !== null && subject !== null) setTimeout(resolveWindow, 500);
+        if (grade !== null && subject !== null) {
+          if (earlyResolveRef.current) clearTimeout(earlyResolveRef.current);
+          earlyResolveRef.current = setTimeout(resolveWindow, 2000);
+        }
       }
       return;
     }
