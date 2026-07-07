@@ -1,10 +1,20 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import TextbookVoiceListener, { type VoiceCommand } from "@/components/TextbookVoiceListener";
 import BoardQuestionsPanel from "@/components/BoardQuestionsPanel";
-import { findTextbook, TEXTBOOKS, type TextbookEntry, getChapterProxyUrl, chapterPdfUrl } from "@/lib/textbook";
+import {
+  findTextbook,
+  TEXTBOOKS,
+  type TextbookEntry,
+  getChapterProxyUrl,
+  chapterPdfUrl,
+  ncertViewerUrl,
+} from "@/lib/textbook";
+
+// Lazy-load the heavy PDF renderer so it doesn't bloat the initial bundle
+const PDFViewer = lazy(() => import("@/components/PDFViewer"));
 
 const OPENAI_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? "";
 
@@ -14,12 +24,6 @@ interface ImportantSection {
   reason: string;
   keywords: string[];
 }
-
-// PDF rendering has 3 stages tried in order:
-//   1. proxy  — /api/pdf-proxy (server fetches → our origin → no X-Frame-Options issue)
-//   2. object — <object> pointing direct to NCERT (browsers sometimes allow even if iframe blocked)
-//   3. failed — show "open in new tab" button
-type PdfStage = "proxy" | "object" | "failed";
 
 // ── GPT helpers ───────────────────────────────────────────────────────────────
 async function fetchImportantSections(book: TextbookEntry): Promise<ImportantSection[]> {
@@ -85,11 +89,11 @@ async function inferSection(transcript: string, book: TextbookEntry): Promise<st
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function TextbookPage() {
-  useAuth(); // ensure auth context is consumed
+  useAuth();
 
   const [activeBook, setActiveBook] = useState<TextbookEntry | null>(null);
   const [activeChapter, setActiveChapter] = useState<number>(1);
-  const [pdfStage, setPdfStage] = useState<PdfStage>("proxy");
+  const [pdfFailed, setPdfFailed] = useState(false);
   const [currentSection, setCurrentSection] = useState("");
   const [importantSections, setImportantSections] = useState<ImportantSection[]>([]);
   const [loadingAnnotations, setLoadingAnnotations] = useState(false);
@@ -98,6 +102,9 @@ export default function TextbookPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TextbookEntry[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
+  // Keywords to highlight — sourced from the active section
+  const [highlightKeywords, setHighlightKeywords] = useState<string[]>([]);
+  const [autoHighlight, setAutoHighlight] = useState(true);
   const sectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const notify = (msg: string) => {
@@ -110,22 +117,30 @@ export default function TextbookPage() {
     const ch = chapter ?? 1;
     setActiveBook(book);
     setActiveChapter(ch);
-    setPdfStage("proxy");
+    setPdfFailed(false);
     setCurrentSection("");
     setImportantSections([]);
+    setHighlightKeywords([]);
     notify(`📖 Opening: ${book.title}${book.hasPdf ? ` — Chapter ${ch}` : ""}`);
 
     setLoadingAnnotations(true);
     const sections = await fetchImportantSections(book);
     setImportantSections(sections);
     setLoadingAnnotations(false);
-  }, []);
+
+    // Auto-highlight the first section's keywords immediately
+    if (sections.length > 0 && autoHighlight) {
+      setHighlightKeywords(sections[0].keywords ?? []);
+      setCurrentSection(sections[0].title);
+    }
+  }, [autoHighlight]);
 
   // ── Jump to a specific chapter ──────────────────────────────────────────
   const goToChapter = useCallback((ch: number) => {
     if (!activeBook) return;
     setActiveChapter(ch);
-    setPdfStage("proxy");
+    setPdfFailed(false);
+    setHighlightKeywords([]);
     notify(`Opening Chapter ${ch}`);
   }, [activeBook]);
 
@@ -133,8 +148,17 @@ export default function TextbookPage() {
   const currentPdfUrl = activeBook
     ? activeBook.hasPdf
       ? getChapterProxyUrl(activeBook, activeChapter)
-      : activeBook.pdfUrl // HTML viewer for grades 1-8
+      : activeBook.pdfUrl
     : "";
+
+  // ── Activate a key section → update highlights ───────────────────────────
+  const activateSection = useCallback((sec: ImportantSection) => {
+    setCurrentSection(sec.title);
+    if (autoHighlight) {
+      setHighlightKeywords(sec.keywords ?? []);
+      notify(`🔍 Highlighting: ${sec.title}`);
+    }
+  }, [autoHighlight]);
 
   // ── Voice command handler ────────────────────────────────────────────────
   const handleVoiceCommand = useCallback(
@@ -264,17 +288,44 @@ export default function TextbookPage() {
           })}
         </div>
 
-        {/* Key Sections */}
+        {/* Key Sections + Auto-Highlight */}
         {activeBook && (
-          <div className="border-t border-slate-800 p-3 shrink-0 max-h-60 overflow-y-auto">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wide">⭐ Key Sections</span>
-              {loadingAnnotations && (
-                <span className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />
-              )}
+          <div className="border-t border-slate-800 p-3 shrink-0 max-h-72 overflow-y-auto">
+            {/* Header row */}
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wide">⭐ Key Sections</span>
+                {loadingAnnotations && (
+                  <span className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />
+                )}
+              </div>
+              {/* Auto-highlight toggle */}
+              <button
+                onClick={() => {
+                  const next = !autoHighlight;
+                  setAutoHighlight(next);
+                  if (!next) setHighlightKeywords([]);
+                  else if (currentSection) {
+                    const sec = importantSections.find((s) => s.title === currentSection);
+                    if (sec) setHighlightKeywords(sec.keywords ?? []);
+                  }
+                }}
+                title={autoHighlight ? "Disable auto-highlight" : "Enable auto-highlight"}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition ${
+                  autoHighlight
+                    ? "bg-yellow-400/15 border-yellow-400/30 text-yellow-300"
+                    : "bg-slate-800 border-slate-700 text-slate-500"
+                }`}
+              >
+                <span>✨</span>
+                <span>{autoHighlight ? "Highlight ON" : "Highlight OFF"}</span>
+              </button>
             </div>
+
             {importantSections.length === 0 && !loadingAnnotations && (
-              <p className="text-[11px] text-slate-600">Loading…</p>
+              <p className="text-[11px] text-slate-600">
+                {OPENAI_KEY ? "Loading…" : "Add NEXT_PUBLIC_OPENAI_API_KEY to enable key sections"}
+              </p>
             )}
             <ul className="space-y-1">
               {importantSections.map((sec) => {
@@ -282,7 +333,7 @@ export default function TextbookPage() {
                 return (
                   <li key={sec.id}>
                     <button
-                      onClick={() => setCurrentSection(sec.title)}
+                      onClick={() => activateSection(sec)}
                       className={`w-full text-left rounded-xl px-2 py-1.5 border transition ${
                         active
                           ? "border-amber-500/30 bg-amber-500/10"
@@ -297,6 +348,15 @@ export default function TextbookPage() {
                         {sec.title}
                       </span>
                       <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug">{sec.reason}</span>
+                      {active && sec.keywords.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {sec.keywords.map((kw) => (
+                            <span key={kw} className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-400/10 text-yellow-300 border border-yellow-400/20">
+                              {kw}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </button>
                   </li>
                 );
@@ -310,7 +370,7 @@ export default function TextbookPage() {
       <main className="flex-1 flex flex-col overflow-hidden bg-slate-950 min-w-0">
         {/* Book header bar */}
         {activeBook && (
-          <div className="shrink-0 px-4 py-2 border-b border-slate-800 bg-slate-900/60 flex items-center gap-3">
+          <div className="shrink-0 px-4 py-2 border-b border-slate-800 bg-slate-900/60 flex items-center gap-3 flex-wrap">
             <div className="flex-1 min-w-0">
               <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-widest">
                 Class {activeBook.grade} · {activeBook.subject}
@@ -346,13 +406,12 @@ export default function TextbookPage() {
                 📍 {currentSection}
               </span>
             )}
-            {/* Stage indicator */}
-            {pdfStage === "object" && (
-              <span className="shrink-0 text-[10px] text-amber-400 border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                fallback mode
+            {highlightKeywords.length > 0 && (
+              <span className="shrink-0 px-2 py-0.5 rounded-full bg-yellow-400/10 text-yellow-300 text-[10px] font-bold border border-yellow-400/20">
+                ✨ {highlightKeywords.length} highlight{highlightKeywords.length !== 1 ? "s" : ""}
               </span>
             )}
-            {/* Open directly link — use raw NCERT URL for PDFs */}
+            {/* Open directly link */}
             <a
               href={activeBook.hasPdf ? chapterPdfUrl(activeBook.code, activeChapter) : activeBook.pdfUrl}
               target="_blank"
@@ -367,42 +426,39 @@ export default function TextbookPage() {
         {/* PDF content area */}
         {!activeBook ? (
           <EmptyState onVoice={() => setVoiceActive(true)} />
-        ) : pdfStage === "proxy" ? (
-          <iframe
-            key={`proxy-${activeBook.code}-${activeChapter}`}
-            src={currentPdfUrl}
-            className="flex-1 w-full border-0"
-            style={{ height: "100%" }}
-            title={`${activeBook.title} — Chapter ${activeChapter}`}
-            allow="fullscreen"
-            onError={() => {
-              console.warn("[textbook] proxy iframe failed, trying <object>");
-              setPdfStage("object");
-            }}
-          />
-        ) : pdfStage === "object" ? (
-          <object
-            key={`object-${activeBook.code}-${activeChapter}`}
-            data={activeBook.hasPdf ? chapterPdfUrl(activeBook.code, activeChapter) : activeBook.pdfUrl}
-            type="application/pdf"
-            className="flex-1 w-full"
-            style={{ height: "100%" }}
-            onError={() => {
-              console.warn("[textbook] <object> also failed");
-              setPdfStage("failed");
-            }}
-          >
+        ) : activeBook.hasPdf ? (
+          /* Classes 9–12: render with PDFViewer for highlights */
+          pdfFailed ? (
             <PDFFailed
               book={activeBook}
               chapter={activeChapter}
-              onRetry={() => setPdfStage("proxy")}
+              onRetry={() => setPdfFailed(false)}
             />
-          </object>
+          ) : (
+            <Suspense
+              fallback={
+                <div className="flex-1 flex items-center justify-center bg-slate-950">
+                  <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              }
+            >
+              <PDFViewer
+                key={`${activeBook.code}-${activeChapter}`}
+                src={currentPdfUrl}
+                highlightKeywords={highlightKeywords}
+                onError={() => setPdfFailed(true)}
+              />
+            </Suspense>
+          )
         ) : (
-          <PDFFailed
-            book={activeBook}
-            chapter={activeChapter}
-            onRetry={() => setPdfStage("proxy")}
+          /* Classes 1–8: NCERT HTML flipbook — embed in iframe */
+          <iframe
+            key={`flipbook-${activeBook.code}`}
+            src={currentPdfUrl}
+            className="flex-1 w-full border-0"
+            style={{ height: "100%" }}
+            title={activeBook.title}
+            allow="fullscreen"
           />
         )}
       </main>
@@ -518,8 +574,7 @@ function PDFFailed({ book, chapter, onRetry }: { book: TextbookEntry; chapter?: 
       <div className="text-5xl">📄</div>
       <h3 className="text-base font-bold text-white">Couldn't display the PDF inline</h3>
       <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
-        NCERT's server is blocking the embed. The PDF is available — open it directly in a new tab
-        where you can read it with full browser controls.
+        NCERT's server may be temporarily unavailable. You can open it directly in a new tab.
       </p>
       <div className="flex gap-3 flex-wrap justify-center">
         <button

@@ -22,6 +22,14 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  webpack(config) {
+    // pdfjs-dist ships its own worker — tell webpack to treat it as an asset
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvas: false, // pdfjs tries to require canvas in Node; ignore it
+    };
+    return config;
+  },
 };
 
 export default nextConfig;

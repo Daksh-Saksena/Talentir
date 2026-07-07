@@ -310,7 +310,7 @@ export function parseVoiceCommand(text: string): { grade: number | null; subject
     ["ninth", 9],    ["eighth", 8],    ["seventh", 7],
     ["sixth", 6],    ["fifth", 5],     ["fourth", 4],
     ["third", 3],    ["second", 2],    ["first", 1],
-  ]) {
+  ] as [string, number][]) {
     if (t.includes(phrase)) { grade = num; break; }
   }
   if (grade === null) {

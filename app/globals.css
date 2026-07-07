@@ -42,3 +42,30 @@ body {
 .animate-fade-in {
   animation: fade-in 0.25s ease-out both;
 }
+
+/* ── PDF Viewer highlight layer ────────────────────────────────────────────── */
+
+/* The text layer sits over the canvas — transparent text for selection */
+.pdf-text-layer span {
+  position: absolute;
+  color: transparent;
+  white-space: nowrap;
+  cursor: text;
+  user-select: text;
+  transform-origin: 0% 100%;
+}
+
+/* Highlighted keyword marks inside the text layer */
+.pdf-highlight {
+  background: rgba(253, 224, 71, 0.55);   /* yellow-300 at 55% */
+  border-radius: 2px;
+  color: transparent;                      /* keep text invisible — canvas shows it */
+  box-shadow: 0 0 0 1.5px rgba(253, 224, 71, 0.4);
+  animation: pdf-highlight-pulse 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pdf-highlight-pulse {
+  0%, 100% { background: rgba(253, 224, 71, 0.55); box-shadow: 0 0 0 1.5px rgba(253, 224, 71, 0.4); }
+  50%       { background: rgba(253, 224, 71, 0.75); box-shadow: 0 0 6px 2px rgba(253, 224, 71, 0.35); }
+}
