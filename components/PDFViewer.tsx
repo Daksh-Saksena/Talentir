@@ -1,38 +1,45 @@
 "use client";
 
 /**
- * PDFViewer
- * ─────────────────────────────────────────────────────────────────────────────
- * Canvas-based PDF renderer using pdfjs-dist.
- * Renders each page to a <canvas>, then overlays a transparent text layer.
- * When `highlightKeywords` is provided, matching text runs are wrapped in
- * <mark> elements with animated yellow highlight styling.
+ * PDFViewer — canvas-based NCERT PDF renderer with accurate text-layer highlighting
  *
- * Props:
- *   src             – proxy URL (/api/pdf-proxy?url=...)
- *   highlightKeywords – array of keyword strings to highlight
- *   onLoadSuccess   – called with total page count after load
- *   onError         – called if PDF fails to load
+ * How highlights work:
+ *   pdfjs gives us TextItem[] where each item has:
+ *     transform: [scaleX, skewX, skewY, scaleY, translateX, translateY]  (PDF user-space coords)
+ *     width, height: in PDF user-space
+ *     str: the text string
+ *
+ *   PDF y-axis is bottom-up; canvas/DOM is top-down.
+ *   We build one absolutely-positioned <span> per text item, sized and placed to
+ *   exactly match the rendered canvas text.  When a keyword matches we swap the
+ *   span's background to yellow — the text itself stays on the canvas, the span
+ *   is fully transparent so the highlight sits perfectly on top.
+ *
+ *   ScaleX is applied AFTER the span is in the DOM so offsetWidth is real.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-// ── Types (avoid importing heavy pdfjs types directly in component) ──────────
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface TextItem {
+  str: string;
+  transform: number[];   // [a, b, c, d, e, f]  — standard PDF CTM
+  width: number;         // advance width in PDF user-space units
+  height: number;
+  fontName?: string;
+  hasEOL?: boolean;
+}
+
+interface PDFViewport {
+  width: number;
+  height: number;
+  // pdfjs also exposes convertToViewportPoint etc., but we only need dimensions here
+}
+
 interface PDFPageProxy {
-  getViewport(params: { scale: number }): { width: number; height: number };
-  render(params: {
-    canvasContext: CanvasRenderingContext2D;
-    viewport: { width: number; height: number };
-  }): { promise: Promise<void> };
-  getTextContent(): Promise<{
-    items: Array<{
-      str: string;
-      transform: number[];
-      width: number;
-      height: number;
-      fontName?: string;
-    }>;
-  }>;
+  getViewport(params: { scale: number }): PDFViewport;
+  render(params: { canvasContext: CanvasRenderingContext2D; viewport: PDFViewport }): { promise: Promise<void> };
+  getTextContent(): Promise<{ items: TextItem[] }>;
 }
 
 interface PDFDocumentProxy {
@@ -48,134 +55,156 @@ interface Props {
   onError?: (err: string) => void;
 }
 
-// ── Scale helpers ────────────────────────────────────────────────────────────
-const SCALE = 1.8; // base render scale — good balance of quality vs performance
+const SCALE = 1.6;
 
-// ── Single page component ────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Build the text layer for one page, with keyword highlights. */
+function buildTextLayer(
+  container: HTMLDivElement,
+  items: TextItem[],
+  viewport: PDFViewport,
+  lowerKeywords: string[]
+) {
+  container.innerHTML = "";
+
+  items.forEach((item) => {
+    if (!item.str.trim()) return;
+
+    // PDF CTM: [a, b, c, d, e, f]
+    // e = tx (x translate in user-space), f = ty (y translate in user-space)
+    // d = scaleY component (font size in user-space, approximately)
+    const [a, , , d, e, f] = item.transform;
+
+    // Convert from PDF user-space to scaled canvas-space
+    const x = e * SCALE;
+    // PDF y is bottom-up; flip to top-down.  `f` is in user-space.
+    const y = viewport.height - f * SCALE;
+
+    // Font size = absolute value of the d component * SCALE
+    const fontSize = Math.abs(d) * SCALE;
+
+    // Horizontal stretch: if `a` differs from `d` the font is artificially scaled.
+    // We store the raw scaleX factor and apply it after the span is in DOM.
+    const pdfScaleX = Math.abs(a) / (Math.abs(d) || 1);
+
+    const span = document.createElement("span");
+    span.dataset.pdfScaleX = String(pdfScaleX);
+    span.dataset.pdfWidth = String(item.width * SCALE);
+
+    // Keyword match?
+    const lower = item.str.toLowerCase();
+    const isHighlighted = lowerKeywords.length > 0 && lowerKeywords.some((kw) => lower.includes(kw));
+
+    span.style.cssText = [
+      "position:absolute",
+      `left:${x}px`,
+      `top:${y - fontSize}px`,      // top = baseline - fontSize (ascender approx)
+      `font-size:${fontSize}px`,
+      "font-family:sans-serif",
+      "line-height:1",
+      "white-space:nowrap",
+      "transform-origin:0% 100%",   // scale from bottom-left (baseline)
+      "color:transparent",
+      "user-select:text",
+      "cursor:text",
+      // Highlighted spans get a yellow background; others are invisible
+      isHighlighted
+        ? "background:rgba(253,224,71,0.55);border-radius:2px;box-shadow:0 0 0 1px rgba(253,224,71,0.4)"
+        : "background:transparent",
+    ].join(";");
+
+    span.textContent = item.str;
+    container.appendChild(span);
+  });
+
+  // Fix scaleX for every span now that they are in the DOM and offsetWidth is real
+  Array.from(container.children).forEach((child) => {
+    const span = child as HTMLSpanElement;
+    const pdfScaleX = parseFloat(span.dataset.pdfScaleX ?? "1");
+    const targetWidth = parseFloat(span.dataset.pdfWidth ?? "0");
+    const naturalWidth = span.offsetWidth;
+    if (naturalWidth > 0 && targetWidth > 0) {
+      span.style.transform = `scaleX(${(targetWidth / naturalWidth) * pdfScaleX})`;
+    } else if (pdfScaleX !== 1) {
+      span.style.transform = `scaleX(${pdfScaleX})`;
+    }
+  });
+}
+
+// ── PDFPage ───────────────────────────────────────────────────────────────────
 function PDFPage({
   page,
-  highlightKeywords = [],
+  highlightKeywords,
   pageNum,
 }: {
   page: PDFPageProxy;
   highlightKeywords: string[];
   pageNum: number;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const textLayerRef = useRef<HTMLDivElement>(null);
-  const [rendered, setRendered] = useState(false);
+  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  const layerRef   = useRef<HTMLDivElement>(null);
+  const renderedRef = useRef(false);
+  const keywordsRef = useRef<string[]>([]);
 
+  // ── Render canvas (only once per page) ────────────────────────────────────
   useEffect(() => {
-    let cancelled = false;
+    if (renderedRef.current) return;
     const canvas = canvasRef.current;
-    const textLayer = textLayerRef.current;
-    if (!canvas || !textLayer) return;
+    if (!canvas) return;
 
     const viewport = page.getViewport({ scale: SCALE });
-    canvas.width = viewport.width;
+    canvas.width  = viewport.width;
     canvas.height = viewport.height;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Render canvas
-    page
-      .render({ canvasContext: ctx, viewport })
-      .promise.then(async () => {
-        if (cancelled) return;
-        setRendered(true);
+    let cancelled = false;
+    page.render({ canvasContext: ctx, viewport }).promise.then(async () => {
+      if (cancelled) return;
+      renderedRef.current = true;
 
-        // Build text layer
+      // Build initial text layer
+      try {
         const content = await page.getTextContent();
-        if (cancelled) return;
-        textLayer.innerHTML = "";
-        textLayer.style.width = `${viewport.width}px`;
-        textLayer.style.height = `${viewport.height}px`;
+        if (cancelled || !layerRef.current) return;
+        layerRef.current.style.width  = `${viewport.width}px`;
+        layerRef.current.style.height = `${viewport.height}px`;
+        const lk = keywordsRef.current.map((k) => k.toLowerCase().trim()).filter(Boolean);
+        buildTextLayer(layerRef.current, content.items, viewport, lk);
+      } catch (_) { /* text extraction failed — highlights just won't show */ }
+    }).catch(() => {});
 
-        const lowerKeywords = highlightKeywords
-          .map((k) => k.toLowerCase().trim())
-          .filter(Boolean);
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
-        content.items.forEach((item) => {
-          if (!item.str.trim()) return;
+  // ── Re-draw highlights when keywords change (no re-render canvas) ─────────
+  useEffect(() => {
+    keywordsRef.current = highlightKeywords;
+    if (!renderedRef.current || !layerRef.current) return;
 
-          const span = document.createElement("span");
-          // Position using transform matrix: [scaleX, skewX, skewY, scaleY, tx, ty]
-          const [, , , scaleY, tx, ty] = item.transform;
-          const fontSize = Math.abs(scaleY) * SCALE;
+    const viewport = page.getViewport({ scale: SCALE });
+    const lk = highlightKeywords.map((k) => k.toLowerCase().trim()).filter(Boolean);
 
-          span.style.cssText = `
-            position: absolute;
-            left: ${tx * SCALE}px;
-            top: ${viewport.height - ty * SCALE}px;
-            font-size: ${fontSize}px;
-            font-family: sans-serif;
-            white-space: nowrap;
-            transform-origin: 0% 100%;
-            transform: scaleX(${item.width > 0 ? (item.width * SCALE) / (span.offsetWidth || 1) : 1});
-            color: transparent;
-            user-select: text;
-            cursor: text;
-          `;
-
-          // Check for keyword matches
-          const lower = item.str.toLowerCase();
-          const matched = lowerKeywords.some((kw) => lower.includes(kw));
-
-          if (matched) {
-            const mark = document.createElement("mark");
-            mark.textContent = item.str;
-            mark.className = "pdf-highlight";
-            span.appendChild(mark);
-          } else {
-            span.textContent = item.str;
-          }
-
-          textLayer.appendChild(span);
-        });
-
-        // Fix scaleX now that spans are in DOM
-        textLayer.querySelectorAll("span").forEach((s) => {
-          const span = s as HTMLSpanElement;
-          const canvas = canvasRef.current;
-          if (!canvas) return;
-          // Re-read actual rendered width and scale to match PDF word width
-          const pdfItem = content.items.find((it) => {
-            return span.textContent?.includes(it.str) && it.width > 0;
-          });
-          if (pdfItem && pdfItem.width > 0) {
-            const naturalWidth = span.offsetWidth;
-            if (naturalWidth > 0) {
-              const targetWidth = pdfItem.width * SCALE;
-              span.style.transform = `scaleX(${targetWidth / naturalWidth})`;
-            }
-          }
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setRendered(true); // still show page even if text extraction fails
-      });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, highlightKeywords.join(",")]);
+    page.getTextContent().then((content) => {
+      if (!layerRef.current) return;
+      buildTextLayer(layerRef.current, content.items, viewport, lk);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightKeywords]);
 
   return (
-    <div
-      className="relative bg-white shadow-lg mx-auto mb-4"
-      style={{ width: "fit-content" }}
-      data-page={pageNum}
-    >
+    <div className="relative bg-white shadow-xl mx-auto mb-5" style={{ width: "fit-content" }}>
       <canvas ref={canvasRef} className="block" />
-      {/* Text layer — transparent, sits over canvas for selection + highlights */}
+      {/* Text layer — absolutely on top of canvas, transparent text, coloured background for highlights */}
       <div
-        ref={textLayerRef}
-        className="absolute inset-0 overflow-hidden select-text"
-        style={{ pointerEvents: "none" }}
+        ref={layerRef}
+        className="absolute inset-0 overflow-hidden"
+        style={{ pointerEvents: "none", userSelect: "text" }}
       />
-      {/* Page number badge */}
-      <div className="absolute bottom-2 right-3 text-[10px] text-slate-400 bg-black/30 px-2 py-0.5 rounded-full select-none">
+      <div className="absolute bottom-2 right-3 text-[10px] text-slate-400/70 bg-black/20 px-1.5 py-0.5 rounded-full select-none pointer-events-none">
         {pageNum}
       </div>
     </div>
@@ -183,18 +212,24 @@ function PDFPage({
 }
 
 // ── Main PDFViewer ────────────────────────────────────────────────────────────
-export default function PDFViewer({ src, highlightKeywords = [], onLoadSuccess, onError }: Props) {
-  const [pages, setPages] = useState<PDFPageProxy[]>([]);
-  const [numPages, setNumPages] = useState(0);
-  const [loading, setLoading] = useState(true);
+export default function PDFViewer({
+  src,
+  highlightKeywords = [],
+  onLoadSuccess,
+  onError,
+}: Props) {
+  const [pages,     setPages]     = useState<PDFPageProxy[]>([]);
+  const [numPages,  setNumPages]  = useState(0);
+  const [loading,   setLoading]   = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
   const [scrollPage, setScrollPage] = useState(1);
-  const docRef = useRef<PDFDocumentProxy | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const pageRefs = useRef<Record<number, HTMLDivElement>>({});
+  const [jumpVal,   setJumpVal]   = useState(1);
 
-  // ── Load PDF via pdfjs ───────────────────────────────────────────────────
+  const docRef      = useRef<PDFDocumentProxy | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pageRefs    = useRef<Record<number, HTMLDivElement>>({});
+
+  // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!src) return;
     let cancelled = false;
@@ -202,22 +237,22 @@ export default function PDFViewer({ src, highlightKeywords = [], onLoadSuccess, 
     setLoadError(null);
     setPages([]);
     setNumPages(0);
-    setCurrentPage(1);
+    setScrollPage(1);
+    setJumpVal(1);
+    pageRefs.current = {};
 
-    // Dynamically import pdfjs to avoid SSR issues
     import("pdfjs-dist").then(async (pdfjs) => {
       if (cancelled) return;
-
-      // Point worker to CDN (avoids bundling 3MB worker)
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      pdfjs.GlobalWorkerOptions.workerSrc =
+        `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
       try {
-        const loadingTask = pdfjs.getDocument({
+        const task = pdfjs.getDocument({
           url: src,
           cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
           cMapPacked: true,
         });
-        const doc = await loadingTask.promise;
+        const doc = await task.promise;
         if (cancelled) { doc.destroy(); return; }
 
         docRef.current = doc as unknown as PDFDocumentProxy;
@@ -225,16 +260,13 @@ export default function PDFViewer({ src, highlightKeywords = [], onLoadSuccess, 
         setNumPages(total);
         onLoadSuccess?.(total);
 
-        // Load all pages (up to 30 for perf; rest lazy-loaded via scroll)
-        const maxEager = Math.min(total, 30);
-        const pageArr: PDFPageProxy[] = [];
-        for (let i = 1; i <= maxEager; i++) {
+        const eager = Math.min(total, 25);
+        const arr: PDFPageProxy[] = [];
+        for (let i = 1; i <= eager; i++) {
           if (cancelled) break;
-          const p = await (doc as any).getPage(i);
-          pageArr.push(p as PDFPageProxy);
+          arr.push((await (doc as any).getPage(i)) as PDFPageProxy);
         }
-        if (!cancelled) setPages(pageArr);
-        setLoading(false);
+        if (!cancelled) { setPages(arr); setLoading(false); }
       } catch (e: any) {
         if (!cancelled) {
           const msg = e?.message ?? "Failed to load PDF";
@@ -250,145 +282,104 @@ export default function PDFViewer({ src, highlightKeywords = [], onLoadSuccess, 
       docRef.current?.destroy();
       docRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
-  // ── Scroll tracking → page indicator ────────────────────────────────────
+  // ── Scroll tracking ───────────────────────────────────────────────────────
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const el = containerRef.current;
+    if (!el) return;
     const handler = () => {
-      // Find which page is most visible in the viewport
-      const containerTop = container.scrollTop;
-      const containerBottom = containerTop + container.clientHeight;
-      let bestPage = 1;
-      let bestVisible = 0;
-      Object.entries(pageRefs.current).forEach(([numStr, el]) => {
-        if (!el) return;
-        const top = el.offsetTop;
-        const bottom = top + el.offsetHeight;
-        const visible = Math.max(0, Math.min(bottom, containerBottom) - Math.max(top, containerTop));
-        if (visible > bestVisible) {
-          bestVisible = visible;
-          bestPage = parseInt(numStr);
-        }
+      const top = el.scrollTop;
+      const bot = top + el.clientHeight;
+      let best = 1, bestVis = 0;
+      Object.entries(pageRefs.current).forEach(([n, div]) => {
+        if (!div) return;
+        const vis = Math.max(0, Math.min(div.offsetTop + div.offsetHeight, bot) - Math.max(div.offsetTop, top));
+        if (vis > bestVis) { bestVis = vis; best = parseInt(n); }
       });
-      setScrollPage(bestPage);
+      setScrollPage(best);
     };
-    container.addEventListener("scroll", handler, { passive: true });
-    return () => container.removeEventListener("scroll", handler);
+    el.addEventListener("scroll", handler, { passive: true });
+    return () => el.removeEventListener("scroll", handler);
   }, [pages.length]);
 
-  // ── Jump to page ─────────────────────────────────────────────────────────
-  const goToPage = useCallback((page: number) => {
-    const el = pageRefs.current[page];
-    if (el && containerRef.current) {
-      containerRef.current.scrollTo({ top: el.offsetTop - 16, behavior: "smooth" });
-    }
-    setCurrentPage(page);
-  }, []);
-
-  // ── Auto-scroll to first highlight when keywords change ──────────────────
+  // ── Auto-scroll to first highlight ───────────────────────────────────────
   useEffect(() => {
     if (!highlightKeywords.length || !containerRef.current) return;
-    // Small delay to let marks render
     const t = setTimeout(() => {
-      const mark = containerRef.current?.querySelector(".pdf-highlight");
-      if (mark) {
-        (mark as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }, 600);
+      // Find first span with yellow background inside any page
+      const first = containerRef.current?.querySelector<HTMLSpanElement>(
+        'span[style*="rgba(253,224,71"]'
+      );
+      if (first) first.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 400);
     return () => clearTimeout(t);
   }, [highlightKeywords]);
 
-  // ── Loading state ────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950 text-slate-400">
-        <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm">Loading PDF…</p>
-        <p className="text-xs text-slate-600 max-w-xs text-center">
-          Fetching from NCERT via proxy. This may take a few seconds.
-        </p>
-      </div>
-    );
-  }
+  const goToPage = useCallback((n: number) => {
+    const el = pageRefs.current[n];
+    if (el && containerRef.current) {
+      containerRef.current.scrollTo({ top: el.offsetTop - 12, behavior: "smooth" });
+    }
+    setJumpVal(n);
+  }, []);
 
-  // ── Error state ──────────────────────────────────────────────────────────
-  if (loadError) {
-    return null; // parent handles fallback
-  }
+  // ── States ────────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950">
+      <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <p className="text-sm text-slate-400">Loading PDF…</p>
+      <p className="text-xs text-slate-600 text-center max-w-xs">Fetching from NCERT. May take a few seconds.</p>
+    </div>
+  );
+
+  if (loadError) return null; // parent shows fallback
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-900">
-      {/* ── Toolbar ── */}
-      <div className="shrink-0 flex items-center gap-3 px-4 py-1.5 border-b border-slate-800 bg-slate-950/80">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => goToPage(Math.max(1, scrollPage - 1))}
-            disabled={scrollPage <= 1}
-            className="px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition"
-          >
-            ‹ Prev
-          </button>
-          <span className="text-xs text-slate-500 px-1 tabular-nums">
-            {scrollPage} / {numPages}
-          </span>
-          <button
-            onClick={() => goToPage(Math.min(numPages, scrollPage + 1))}
-            disabled={scrollPage >= numPages}
-            className="px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition"
-          >
-            Next ›
-          </button>
-        </div>
+      {/* Toolbar */}
+      <div className="shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-slate-800 bg-slate-950/80">
+        <button onClick={() => goToPage(Math.max(1, scrollPage - 1))} disabled={scrollPage <= 1}
+          className="px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition">
+          ‹ Prev
+        </button>
+        <span className="text-xs text-slate-500 tabular-nums w-16 text-center">{scrollPage} / {numPages}</span>
+        <button onClick={() => goToPage(Math.min(numPages, scrollPage + 1))} disabled={scrollPage >= numPages}
+          className="px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition">
+          Next ›
+        </button>
 
-        {/* Jump to page */}
         <input
-          type="number"
-          min={1}
-          max={numPages}
-          value={currentPage}
-          onChange={(e) => setCurrentPage(Number(e.target.value))}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") goToPage(currentPage);
-          }}
+          type="number" min={1} max={numPages} value={jumpVal}
+          onChange={(e) => setJumpVal(Number(e.target.value))}
+          onKeyDown={(e) => e.key === "Enter" && goToPage(jumpVal)}
+          title="Jump to page (press Enter)"
           className="w-16 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center focus:outline-none focus:border-indigo-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          title="Jump to page"
         />
 
-        {/* Highlight indicator */}
         {highlightKeywords.length > 0 && (
-          <div className="flex items-center gap-1.5 ml-auto">
-            <span className="w-3 h-3 rounded-sm bg-yellow-300/90" />
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-yellow-300/90 inline-block" />
             <span className="text-[11px] text-slate-400">
-              Highlighting:{" "}
-              <span className="text-yellow-300 font-medium">
-                {highlightKeywords.slice(0, 3).join(", ")}
-                {highlightKeywords.length > 3 ? ` +${highlightKeywords.length - 3}` : ""}
+              Highlighting: <span className="text-yellow-300 font-medium">
+                {highlightKeywords.slice(0, 3).join(", ")}{highlightKeywords.length > 3 ? ` +${highlightKeywords.length - 3}` : ""}
               </span>
             </span>
           </div>
         )}
       </div>
 
-      {/* ── Pages ── */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-auto p-6 bg-slate-800">
+      {/* Pages */}
+      <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-auto p-6 bg-slate-700">
         <div className="flex flex-col items-center min-w-max">
           {pages.map((p, i) => (
-            <div
-              key={i}
-              ref={(el) => {
-                if (el) pageRefs.current[i + 1] = el;
-              }}
-            >
+            <div key={i} ref={(el) => { if (el) pageRefs.current[i + 1] = el; }}>
               <PDFPage page={p} highlightKeywords={highlightKeywords} pageNum={i + 1} />
             </div>
           ))}
           {pages.length < numPages && (
-            <p className="text-xs text-slate-600 py-4">
-              Showing first {pages.length} of {numPages} pages
-            </p>
+            <p className="text-xs text-slate-500 py-4">Showing first {pages.length} of {numPages} pages</p>
           )}
         </div>
       </div>

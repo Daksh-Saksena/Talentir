@@ -127,7 +127,14 @@ Rules:
       setQuestions(
         parsed.map((q, i) => ({
           ...q,
-          marks: Number(q.marks) || 2,
+          // Sanitize fields that GPT occasionally omits or mis-types
+          source:   typeof q.source === "string" && q.source.trim() ? q.source.trim() : "CBSE",
+          marks:    Number(q.marks) || 2,
+          question: typeof q.question === "string" ? q.question : String(q.question ?? ""),
+          answer:   typeof q.answer  === "string" ? q.answer  : undefined,
+          type:     (["short","long","mcq","case"] as const).includes(q.type as any)
+                      ? q.type
+                      : "short",
           id: `q-${Date.now()}-${i}`,
           expanded: false,
         }))
@@ -268,7 +275,12 @@ Rules:
         )}
 
         {/* Questions */}
-        {!loading && questions.map((q) => (
+        {!loading && questions.map((q) => {
+          // Defensive: GPT sometimes returns unexpected/missing type values
+          const safeType = (["short","long","mcq","case"].includes(q.type) ? q.type : "short") as BoardQuestion["type"];
+          const typeBadge = typeLabel[safeType] ?? safeType.toUpperCase();
+
+          return (
           <div
             key={q.id}
             className="rounded-2xl border border-slate-800 bg-slate-900/50 overflow-hidden transition hover:border-slate-700"
@@ -277,13 +289,13 @@ Rules:
               {/* Badges */}
               <div className="flex gap-1.5 flex-wrap mb-2.5">
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700 uppercase tracking-wide">
-                  {q.source}
+                  {q.source ?? "CBSE"}
                 </span>
                 <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${marksColor(q.marks)}`}>
                   {q.marks}M
                 </span>
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-                  {typeLabel[q.type] ?? q.type.toUpperCase()}
+                  {typeBadge}
                 </span>
               </div>
 
@@ -318,7 +330,8 @@ Rules:
               </>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

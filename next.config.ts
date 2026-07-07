@@ -22,13 +22,11 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  webpack(config) {
-    // pdfjs-dist ships its own worker — tell webpack to treat it as an asset
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      canvas: false, // pdfjs tries to require canvas in Node; ignore it
-    };
-    return config;
+  turbopack: {
+    // pdfjs-dist tries to require 'canvas' in Node — resolve to false
+    resolveAlias: {
+      canvas: { browser: "./node_modules/pdfjs-dist/build/pdf.mjs" },
+    },
   },
 };
 

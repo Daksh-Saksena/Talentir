@@ -2,17 +2,15 @@
 
 /**
  * TextbookVoiceListener
- * ──────────────────────
- * Uses Deepgram's real-time WebSocket API for accurate speech recognition.
- * Falls back to browser SpeechRecognition if Deepgram is unavailable.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Voice recognition for the textbook page.
  *
- * Shows recognized words in real-time, and fires onCommand when it detects
- * a grade + subject (and optionally a chapter number).
+ * Strategy (mirrors Talentir-daksh_ayush/live-class):
+ *   1. Try Deepgram nova-2 WebSocket with smart_format=true  (best accuracy)
+ *   2. Fall back to browser SpeechRecognition (webkitSpeechRecognition)
  *
- * Supports commands like:
- *   "open physics class 12 chapter 1" → opens Chapter 1 of Class 12 Physics
- *   "class 10 science" → opens Class 10 Science (Chapter 1)
- *   "show class 9 maths chapter 5" → opens Chapter 5 of Class 9 Maths
+ * Fires onCommand when grade + subject are both recognised.
+ * Fires onTranscript for any other speech (used for section inference).
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -31,339 +29,200 @@ interface Props {
   active?: boolean;
 }
 
-const DEEPGRAM_API_KEY = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY ?? "";
+const DEEPGRAM_KEY = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY ?? "";
 
-// ── Component ─────────────────────────────────────────────────────────────────
 export default function TextbookVoiceListener({ onCommand, onTranscript, active = false }: Props) {
-  const [isListening, setIsListening] = useState(false);
-  const [liveText, setLiveText] = useState("");          // interim text shown to user
-  const [lastFired, setLastFired] = useState("");        // last matched command
-  const [statusMsg, setStatusMsg] = useState("Voice off");
-  const [statusType, setStatusType] = useState<"idle" | "on" | "error" | "bad-browser">("idle");
-  const [recognizedWords, setRecognizedWords] = useState<string[]>([]); // rolling window of words
+  const [isListening, setIsListening]   = useState(false);
+  const [liveText,    setLiveText]       = useState("");
+  const [lastFired,   setLastFired]      = useState("");
+  const [statusMsg,   setStatusMsg]      = useState("Voice off");
+  const [statusType,  setStatusType]     = useState<"idle" | "on" | "error">("idle");
+  const [words,       setWords]          = useState<string[]>([]);
 
-  // Refs
-  const onCommandRef = useRef(onCommand);
+  const onCommandRef    = useRef(onCommand);
   const onTranscriptRef = useRef(onTranscript);
-  const wantListeningRef = useRef(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const recRef = useRef<any>(null); // browser SpeechRecognition fallback
-  const lastRestartTimeRef = useRef(0);
-  const MIN_RESTART_INTERVAL = 5000;
-  const accumulatedTextRef = useRef("");
+  const wantRef         = useRef(false);         // do we want to be listening?
+  const mediaRecRef     = useRef<MediaRecorder | null>(null);
+  const socketRef       = useRef<WebSocket | null>(null);
+  const nativeRef       = useRef<any>(null);
+  const lastRestartRef  = useRef(0);
+  const MIN_GAP = 4000;                          // min ms between restarts
 
-  // Keep refs current
   useEffect(() => { onCommandRef.current = onCommand; }, [onCommand]);
   useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
 
-  // ── Process a final transcript ───────────────────────────────────────────
+  // ── Process a final transcript ─────────────────────────────────────────
   const processFinal = useCallback((text: string) => {
+    if (!text.trim()) return;
     setLastFired(text);
-    const parsed = parseVoiceCommand(text);
-    const { grade, subject, chapter } = parsed;
-
-    const shouldFire = grade !== null && subject !== null;
-
-    if (shouldFire) {
-      const query = [grade ? `class ${grade}` : "", subject ?? ""].filter(Boolean).join(" ");
-      onCommandRef.current({
-        type: "open_book",
-        query,
-        raw: text,
-        chapter,
-      });
+    const { grade, subject, chapter } = parseVoiceCommand(text);
+    if (grade !== null && subject !== null) {
+      const query = `class ${grade} ${subject}`;
+      onCommandRef.current({ type: "open_book", query, raw: text, chapter });
       setLiveText("");
-      setRecognizedWords([]);
+      setWords([]);
     } else {
       onTranscriptRef.current?.(text);
     }
   }, []);
 
-  // ── Start Deepgram WebSocket ─────────────────────────────────────────────
-  function startDeepgram() {
-    if (!DEEPGRAM_API_KEY) {
-      // Fall back to browser SpeechRecognition
-      startBrowserRecognition();
-      return;
-    }
+  // ── Word chip display ──────────────────────────────────────────────────
+  const pushWords = (text: string) => {
+    setWords((prev) => [...prev, ...text.split(/\s+/).filter(Boolean)].slice(-20));
+  };
 
-    try {
-      const ws = new WebSocket(
-        `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&language=en-IN&interim_results=true&endpointing=200&utterance_end_ms=1000`
-      );
-
-      ws.onopen = () => {
-        setIsListening(true);
-        setStatusType("on");
-        setStatusMsg("Listening…");
-        accumulatedTextRef.current = "";
-
-        // Start recording from microphone
-        navigator.mediaDevices.getUserMedia({ audio: true })
-          .then((stream) => {
-            const mediaRecorder = new MediaRecorder(stream, {
-              mimeType: "audio/webm;codecs=opus",
-            });
-            mediaRecorder.ondataavailable = (event) => {
-              if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                ws.send(event.data);
-              }
-            };
-            mediaRecorder.start(250); // send chunks every 250ms
-
-            // Store refs for cleanup
-            (ws as any)._mediaRecorder = mediaRecorder;
-            (ws as any)._stream = stream;
-          })
-          .catch((err) => {
-            console.error("[voice] mic error:", err);
-            setStatusType("error");
-            setStatusMsg("Mic access denied");
-            ws.close();
-          });
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "Results" && data.channel?.alternatives?.[0]) {
-            const transcript = data.channel.alternatives[0].transcript;
-            const isFinal = data.is_final;
-
-            if (transcript) {
-              setLiveText(transcript);
-
-              // Update rolling word window
-              const words = transcript.split(/\s+/).filter(Boolean);
-              setRecognizedWords((prev) => {
-                const combined = [...prev, ...words];
-                // Keep last 20 words
-                return combined.slice(-20);
-              });
-
-              if (isFinal) {
-                accumulatedTextRef.current += " " + transcript;
-                processFinal(accumulatedTextRef.current.trim());
-                accumulatedTextRef.current = "";
-              }
-            }
-          }
-        } catch (e) {
-          // ignore parse errors
-        }
-      };
-
-      ws.onerror = () => {
-        // Fall back to browser recognition
-        startBrowserRecognition();
-      };
-
-      ws.onclose = () => {
-        setIsListening(false);
-        // Clean up media resources
-        try { (ws as any)._mediaRecorder?.stop(); } catch (_) {}
-        try { (ws as any)._stream?.getTracks().forEach((t: MediaStreamTrack) => t.stop()); } catch (_) {}
-
-        if (wantListeningRef.current) {
-          const now = Date.now();
-          const timeSinceLastRestart = now - lastRestartTimeRef.current;
-          if (timeSinceLastRestart < MIN_RESTART_INTERVAL) {
-            const waitTime = MIN_RESTART_INTERVAL - timeSinceLastRestart;
-            setStatusMsg(`Waiting ${Math.ceil(waitTime / 1000)}s…`);
-            setTimeout(() => {
-              if (wantListeningRef.current) {
-                lastRestartTimeRef.current = Date.now();
-                startDeepgram();
-              }
-            }, waitTime);
-          } else {
-            setStatusMsg("Restarting…");
-            lastRestartTimeRef.current = now;
-            setTimeout(() => {
-              if (wantListeningRef.current) startDeepgram();
-            }, 300);
-          }
-        } else {
-          setStatusType("idle");
-          setStatusMsg("Voice off");
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (err) {
-      // Fall back to browser recognition
-      startBrowserRecognition();
-    }
-  }
-
-  // ── Browser SpeechRecognition fallback ───────────────────────────────────
-  function startBrowserRecognition() {
-    if (typeof window === "undefined") return;
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      setStatusType("bad-browser");
-      setStatusMsg("Needs Chrome or Edge");
-      return;
-    }
-
-    if (recRef.current) {
-      try { recRef.current.abort(); } catch (_) {}
-      recRef.current = null;
-    }
-
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-IN";
-    rec.maxAlternatives = 3;
-
-    rec.onstart = () => {
-      setIsListening(true);
-      setStatusType("on");
-      setStatusMsg("Listening…");
-      accumulatedTextRef.current = "";
-    };
-
-    rec.onresult = (e: any) => {
-      const resultList: SpeechRecognitionResultList = e.results;
-      const last = resultList[resultList.length - 1];
-      let bestText = last[0].transcript;
-      let bestConf = last[0].confidence ?? 0;
-      for (let i = 1; i < last.length; i++) {
-        if ((last[i].confidence ?? 0) > bestConf) {
-          bestConf = last[i].confidence;
-          bestText = last[i].transcript;
-        }
-      }
-
-      setLiveText(bestText);
-
-      // Update rolling word window
-      const words = bestText.split(/\s+/).filter(Boolean);
-      setRecognizedWords((prev) => {
-        const combined = [...prev, ...words];
-        return combined.slice(-20);
-      });
-
-      if (last.isFinal) {
-        accumulatedTextRef.current += " " + bestText;
-        processFinal(accumulatedTextRef.current.trim());
-        accumulatedTextRef.current = "";
-      }
-    };
-
-    rec.onerror = (e: any) => {
-      if (e.error === "not-allowed" || e.error === "permission-denied") {
-        setStatusType("error");
-        setStatusMsg("Mic permission denied");
-        wantListeningRef.current = false;
-        setIsListening(false);
-        return;
-      }
-    };
-
-    rec.onend = () => {
-      setIsListening(false);
-      if (wantListeningRef.current) {
-        const now = Date.now();
-        const timeSinceLastRestart = now - lastRestartTimeRef.current;
-        if (timeSinceLastRestart < MIN_RESTART_INTERVAL) {
-          const waitTime = MIN_RESTART_INTERVAL - timeSinceLastRestart;
-          setStatusMsg(`Waiting ${Math.ceil(waitTime / 1000)}s…`);
-          setTimeout(() => {
-            if (wantListeningRef.current) {
-              lastRestartTimeRef.current = Date.now();
-              startBrowserRecognition();
-            }
-          }, waitTime);
-        } else {
-          setStatusMsg("Restarting…");
-          lastRestartTimeRef.current = now;
-          setTimeout(() => {
-            if (wantListeningRef.current) startBrowserRecognition();
-          }, 300);
-        }
-      } else {
-        setStatusType("idle");
-        setStatusMsg("Voice off");
-      }
-    };
-
-    recRef.current = rec;
-    try {
-      rec.start();
-    } catch (err: any) {
-      if (!err.message?.includes("already started")) {
-        setStatusType("error");
-        setStatusMsg("Could not start mic");
-      }
-    }
-  }
-
-  function stopRecognition() {
-    wantListeningRef.current = false;
-    // Close Deepgram WebSocket
-    if (wsRef.current) {
-      try {
-        (wsRef.current as any)._mediaRecorder?.stop();
-        (wsRef.current as any)._stream?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
-        wsRef.current.close();
-      } catch (_) {}
-      wsRef.current = null;
-    }
-    // Stop browser recognition
-    try { recRef.current?.stop(); } catch (_) {}
-    recRef.current = null;
+  // ── Stop all engines ───────────────────────────────────────────────────
+  const stopAll = useCallback(() => {
+    wantRef.current = false;
+    // Deepgram
+    try { socketRef.current?.close(); } catch (_) {}
+    socketRef.current = null;
+    try { mediaRecRef.current?.stop(); } catch (_) {}
+    try { mediaRecRef.current?.stream?.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    mediaRecRef.current = null;
+    // Native
+    try { nativeRef.current?.stop(); } catch (_) {}
+    nativeRef.current = null;
     setIsListening(false);
     setStatusType("idle");
     setStatusMsg("Voice off");
     setLiveText("");
-    setRecognizedWords([]);
-    accumulatedTextRef.current = "";
-  }
-
-  function toggle() {
-    if (wantListeningRef.current) {
-      stopRecognition();
-    } else {
-      wantListeningRef.current = true;
-      lastRestartTimeRef.current = 0;
-      startDeepgram(); // tries Deepgram first, falls back to browser
-    }
-  }
-
-  // Respond to external `active` prop
-  useEffect(() => {
-    if (active && !wantListeningRef.current) {
-      wantListeningRef.current = true;
-      lastRestartTimeRef.current = 0;
-      startDeepgram();
-    }
-    if (!active && wantListeningRef.current) {
-      stopRecognition();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
-
-  // Cleanup on unmount
-  useEffect(() => () => {
-    wantListeningRef.current = false;
-    if (wsRef.current) {
-      try {
-        (wsRef.current as any)._mediaRecorder?.stop();
-        (wsRef.current as any)._stream?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
-        wsRef.current.close();
-      } catch (_) {}
-    }
-    try { recRef.current?.abort(); } catch (_) {}
+    setWords([]);
   }, []);
 
-  // ── UI ────────────────────────────────────────────────────────────────────
+  // ── Native SpeechRecognition fallback ─────────────────────────────────
+  const startNative = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setStatusType("error");
+      setStatusMsg("Needs Chrome/Edge");
+      return;
+    }
+    try { nativeRef.current?.abort(); } catch (_) {}
+    nativeRef.current = null;
+
+    const rec = new SR();
+    rec.continuous      = true;
+    rec.interimResults  = true;
+    rec.lang            = "en-IN";
+    rec.maxAlternatives = 3;
+
+    rec.onstart  = () => { setIsListening(true); setStatusType("on"); setStatusMsg("Listening…"); };
+    rec.onresult = (e: any) => {
+      const last = e.results[e.results.length - 1];
+      let best = last[0].transcript, bestConf = last[0].confidence ?? 0;
+      for (let i = 1; i < last.length; i++) {
+        if ((last[i].confidence ?? 0) > bestConf) { best = last[i].transcript; bestConf = last[i].confidence; }
+      }
+      setLiveText(best);
+      pushWords(best);
+      if (last.isFinal) { processFinal(best); }
+    };
+    rec.onerror = (e: any) => {
+      if (e.error === "not-allowed" || e.error === "permission-denied") {
+        setStatusType("error"); setStatusMsg("Mic denied"); wantRef.current = false;
+      }
+    };
+    rec.onend = () => {
+      setIsListening(false);
+      if (!wantRef.current) { setStatusType("idle"); setStatusMsg("Voice off"); return; }
+      const now = Date.now();
+      const wait = Math.max(0, MIN_GAP - (now - lastRestartRef.current));
+      setStatusMsg(wait > 0 ? `Restarting in ${Math.ceil(wait / 1000)}s…` : "Restarting…");
+      setTimeout(() => { if (wantRef.current) { lastRestartRef.current = Date.now(); startNative(); } }, wait + 200);
+    };
+
+    nativeRef.current = rec;
+    try { rec.start(); } catch (e: any) { if (!e?.message?.includes("already started")) { setStatusType("error"); setStatusMsg("Mic unavailable"); } }
+  }, [processFinal]);
+
+  // ── Deepgram nova-2 ────────────────────────────────────────────────────
+  const startDeepgram = useCallback(() => {
+    if (!DEEPGRAM_KEY) { startNative(); return; }
+
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        const mediaRec = new MediaRecorder(stream, { mimeType: "audio/webm" });
+        mediaRecRef.current = mediaRec;
+
+        // nova-2 with smart_format mirrors what daksh_ayush live-class uses
+        const ws = new WebSocket(
+          "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&interim_results=true&language=en-IN",
+          ["token", DEEPGRAM_KEY]
+        );
+        socketRef.current = ws;
+
+        ws.onopen = () => {
+          setIsListening(true);
+          setStatusType("on");
+          setStatusMsg("Listening…");
+          mediaRec.start(250);
+        };
+
+        ws.onmessage = (msg) => {
+          try {
+            const data = JSON.parse(msg.data);
+            const transcript: string = data?.channel?.alternatives?.[0]?.transcript ?? "";
+            if (!transcript) return;
+            setLiveText(transcript);
+            pushWords(transcript);
+            if (data.is_final) processFinal(transcript);
+          } catch (_) {}
+        };
+
+        ws.onerror = () => {
+          // Deepgram failed — fall back to native
+          try { ws.close(); } catch (_) {}
+          try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+          if (wantRef.current) startNative();
+        };
+
+        ws.onclose = () => {
+          setIsListening(false);
+          try { mediaRec.stop(); } catch (_) {}
+          try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+          if (!wantRef.current) { setStatusType("idle"); setStatusMsg("Voice off"); return; }
+          const now = Date.now();
+          const wait = Math.max(0, MIN_GAP - (now - lastRestartRef.current));
+          setStatusMsg(wait > 0 ? `Restarting in ${Math.ceil(wait / 1000)}s…` : "Restarting…");
+          setTimeout(() => {
+            if (wantRef.current) { lastRestartRef.current = Date.now(); startDeepgram(); }
+          }, wait + 200);
+        };
+
+        mediaRec.ondataavailable = (e) => {
+          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+        };
+      })
+      .catch(() => {
+        // Mic permission denied or unavailable
+        if (wantRef.current) startNative();
+      });
+  }, [processFinal, startNative]);
+
+  // ── Toggle ─────────────────────────────────────────────────────────────
+  const toggle = useCallback(() => {
+    if (wantRef.current) { stopAll(); return; }
+    wantRef.current = true;
+    lastRestartRef.current = 0;
+    startDeepgram();
+  }, [stopAll, startDeepgram]);
+
+  // ── Respond to external `active` prop ─────────────────────────────────
+  useEffect(() => {
+    if (active && !wantRef.current) { wantRef.current = true; lastRestartRef.current = 0; startDeepgram(); }
+    if (!active && wantRef.current) { stopAll(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  // ── Cleanup on unmount ─────────────────────────────────────────────────
+  useEffect(() => () => { wantRef.current = false; stopAll(); }, [stopAll]);
+
+  // ── UI ─────────────────────────────────────────────────────────────────
   const dotClass =
-    statusType === "on" ? "bg-green-500 animate-pulse"
-    : statusType === "error" ? "bg-red-500"
-    : statusType === "bad-browser" ? "bg-amber-500"
-    : "bg-slate-600";
+    statusType === "on"    ? "bg-green-400 animate-pulse" :
+    statusType === "error" ? "bg-red-500"                  : "bg-slate-600";
 
   return (
     <div className="flex flex-col gap-2">
@@ -371,15 +230,14 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
         {/* Mic button */}
         <button
           onClick={toggle}
-          disabled={statusType === "bad-browser"}
-          title={isListening ? "Stop voice commands" : "Start voice commands"}
-          className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-2xl border transition-all
-            ${statusType === "on"
+          title={isListening ? "Stop voice" : "Start voice"}
+          className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-2xl border transition-all ${
+            statusType === "on"
               ? "border-green-500/40 bg-green-500/10 text-green-400"
               : statusType === "error"
               ? "border-red-500/40 bg-red-500/10 text-red-400"
               : "border-slate-700 bg-slate-800 text-slate-400 hover:border-indigo-500/40 hover:text-indigo-300"
-            }`}
+          }`}
         >
           {isListening && (
             <span className="absolute inset-0 rounded-2xl border border-green-500/40 animate-ping opacity-25 pointer-events-none" />
@@ -391,50 +249,33 @@ export default function TextbookVoiceListener({ onCommand, onTranscript, active 
         </button>
 
         {/* Status */}
-        <div className="flex flex-col gap-0.5 min-w-0 flex-1 overflow-hidden">
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass}`} />
             <span className="text-[11px] font-medium text-slate-400 truncate">{statusMsg}</span>
           </div>
-
-          {/* Live interim transcript */}
-          {liveText && (
-            <p className="text-[10px] text-slate-500 truncate italic">"{liveText}"</p>
-          )}
-
-          {/* Last successfully fired command */}
-          {!liveText && lastFired && (
-            <p className="text-[10px] text-green-400/70 truncate">✓ {lastFired}</p>
-          )}
-
-          {/* Helper hint when off */}
+          {liveText && <p className="text-[10px] text-slate-500 truncate italic">"{liveText}"</p>}
+          {!liveText && lastFired && <p className="text-[10px] text-green-400/70 truncate">✓ {lastFired}</p>}
           {statusType === "idle" && !liveText && !lastFired && (
             <p className="text-[10px] text-slate-600 truncate">Say "open class 10 science"</p>
           )}
         </div>
       </div>
 
-      {/* Recognized words display */}
-      {recognizedWords.length > 0 && (
+      {/* Recognized words */}
+      {words.length > 0 && (
         <div className="flex flex-wrap gap-1 px-1">
-          {recognizedWords.map((word, i) => {
-            const lower = word.toLowerCase();
-            const isGrade = /^(class|grade|std|twelfth|eleventh|tenth|ninth|eighth|seventh|sixth|fifth|fourth|third|second|first)$/.test(lower) || /^(1[0-2]|[1-9])$/.test(lower);
-            const isSubject = ["physics","chemistry","maths","math","mathematics","biology","science","english","hindi","sanskrit","history","geography","economics","accountancy","accounts","business","evs","sst","bio","chem","geo","eco"].includes(lower);
-            const isChapter = /^chapter$|^ch$/.test(lower) || /^\d+$/.test(lower);
+          {words.map((word, i) => {
+            const lw = word.toLowerCase();
+            const isGrade   = /^(class|grade|\d+|twelfth|eleventh|tenth|ninth|eighth|seventh|sixth|fifth|fourth|third|second|first)$/.test(lw);
+            const isSubject = ["physics","chemistry","maths","math","mathematics","biology","science","english","hindi","sanskrit","history","geography","economics","accountancy","accounts","business","evs","sst","bio","chem","geo"].includes(lw);
+            const isChapter = /^(chapter|ch|\d+)$/.test(lw);
             return (
-              <span
-                key={i}
-                className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                  isGrade
-                    ? "bg-indigo-500/20 text-indigo-300"
-                    : isSubject
-                    ? "bg-emerald-500/20 text-emerald-300"
-                    : isChapter
-                    ? "bg-amber-500/20 text-amber-300"
-                    : "bg-slate-800 text-slate-500"
-                }`}
-              >
+              <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                isGrade   ? "bg-indigo-500/20 text-indigo-300"  :
+                isSubject ? "bg-emerald-500/20 text-emerald-300":
+                isChapter ? "bg-amber-500/20 text-amber-300"    : "bg-slate-800 text-slate-500"
+              }`}>
                 {word}
               </span>
             );

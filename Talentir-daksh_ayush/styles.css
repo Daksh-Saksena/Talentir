@@ -1,0 +1,179 @@
+:root {
+    --neon-cyan: #00f2ff;
+    --neon-purple: #bc13fe;
+    --deep-bg: #030712;
+    --glass-bg: rgba(17, 24, 39, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --chalk-white: #f3f4f6;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;800&family=Kalam:wght@300;400;700&display=swap');
+
+body {
+    background-color: var(--deep-bg);
+    color: #f3f4f6;
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    overflow: hidden;
+}
+
+.mono { font-family: 'JetBrains Mono', monospace; }
+.chalk-font { font-family: 'Kalam', cursive; }
+
+.glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.teacher-view {
+    position: relative;
+    background: #000;
+    border-radius: 24px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 242, 255, 0.2);
+    width: 100%;
+    aspect-ratio: 3/4;
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.teacher-view:hover {
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 30px rgba(0, 242, 255, 0.15);
+}
+
+#video-element {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.canvas-container {
+    background: #1a1c1e; /* Dark chalkboard base */
+    background-image: 
+        radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0);
+    background-size: 40px 40px;
+    border-radius: 32px;
+    border: 4px solid #2d2f31;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 0 100px rgba(0,0,0,0.5);
+}
+
+/* Add a subtle chalk texture overlay */
+.canvas-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('https://www.transparenttextures.com/patterns/black-chalkboard.png');
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+#whiteboard {
+    cursor: crosshair;
+    filter: drop-shadow(0 0 2px rgba(255,255,255,0.2));
+}
+
+.writing-indicator {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    padding: 10px 20px;
+    background: rgba(0, 242, 255, 0.1);
+    border: 1px solid var(--neon-cyan);
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--neon-cyan);
+    display: none;
+    z-index: 20;
+    backdrop-filter: blur(8px);
+}
+
+.mic-pulse {
+    animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes pulse-ring {
+    0% { transform: scale(.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 15px rgba(6, 182, 212, 0); }
+    100% { transform: scale(.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.1);
+    border-radius: 10px;
+}
+
+.scanline {
+    width: 100%;
+    height: 2px;
+    background: rgba(0, 242, 255, 0.1);
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    animation: scan 4s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes scan {
+    0% { top: 0; }
+    100% { top: 100%; }
+}
+
+/* Simulation Overlay */
+#resource-overlay {
+    position: fixed;
+    bottom: -100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 1000px;
+    height: 70vh;
+    background: var(--deep-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 32px 32px 0 0;
+    z-index: 100;
+    transition: bottom 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+}
+
+#resource-overlay.active {
+    bottom: 0;
+}
+
+#resource-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+#resource-content {
+    flex: 1;
+    border-radius: 20px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.wiki-image {
+    max-width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: 16px;
+    margin: 10px auto;
+    display: block;
+    border: 1px solid rgba(255,255,255,0.1);
+}

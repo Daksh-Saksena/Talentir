@@ -114,14 +114,14 @@ export default function TextbookPage() {
 
   // ── Open a textbook ──────────────────────────────────────────────────────
   const openBook = useCallback(async (book: TextbookEntry, chapter?: number | null) => {
-    const ch = chapter ?? 1;
+    const ch = (chapter && chapter >= 1) ? chapter : 1;
     setActiveBook(book);
     setActiveChapter(ch);
     setPdfFailed(false);
     setCurrentSection("");
     setImportantSections([]);
     setHighlightKeywords([]);
-    notify(`📖 Opening: ${book.title}${book.hasPdf ? ` — Chapter ${ch}` : ""}`);
+    notify(`📖 ${book.title}${book.hasPdf ? ` — Chapter ${ch}` : ""}`);
 
     setLoadingAnnotations(true);
     const sections = await fetchImportantSections(book);
@@ -141,7 +141,7 @@ export default function TextbookPage() {
     setActiveChapter(ch);
     setPdfFailed(false);
     setHighlightKeywords([]);
-    notify(`Opening Chapter ${ch}`);
+    notify(`📄 Chapter ${ch}`);
   }, [activeBook]);
 
   // ── Build the current PDF URL ───────────────────────────────────────────
@@ -166,7 +166,16 @@ export default function TextbookPage() {
       if (cmd.type === "open_book") {
         const book = findTextbook(cmd.query);
         if (book) {
-          openBook(book, cmd.chapter);
+          // Clamp chapter to valid range for this book
+          let ch: number | null = cmd.chapter ?? null;
+          if (ch !== null && ch !== undefined) {
+            if (!book.hasPdf) {
+              ch = null; // HTML viewer books don't have chapter PDFs
+            } else {
+              ch = Math.max(1, Math.min(ch, book.chapters));
+            }
+          }
+          openBook(book, ch);
         } else {
           notify(`❓ No match for "${cmd.query}". Try "Class 10 Science" or "Class 12 Physics".`);
         }
