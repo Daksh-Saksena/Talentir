@@ -280,11 +280,29 @@ export function findTextbook(query: string): TextbookEntry | null {
 export function parseVoiceCommand(text: string): { grade: number | null; subject: string | null; chapter: number | null } {
   const t = text.toLowerCase().trim();
 
-  // Extract chapter number
+  // Extract chapter number — handles both digit ("chapter 3") and word ("chapter three")
   let chapter: number | null = null;
-  const chMatch = t.match(/(?:chapter|ch)\s*(\d+)/i);
-  if (chMatch && chMatch[1]) {
-    chapter = parseInt(chMatch[1], 10);
+
+  // Digit form: "chapter 3", "ch3", "ch 3"
+  const chDigit = t.match(/\b(?:chapter|ch)\.?\s*(\d+)/i);
+  if (chDigit?.[1]) {
+    chapter = parseInt(chDigit[1], 10);
+  }
+
+  // Word form: "chapter three", "chapter five" etc.
+  if (chapter === null) {
+    const wordNums: [string, number][] = [
+      ["one", 1], ["two", 2], ["three", 3], ["four", 4], ["five", 5],
+      ["six", 6], ["seven", 7], ["eight", 8], ["nine", 9], ["ten", 10],
+      ["eleven", 11], ["twelve", 12], ["thirteen", 13], ["fourteen", 14],
+      ["fifteen", 15], ["sixteen", 16], ["seventeen", 17], ["eighteen", 18],
+      ["nineteen", 19], ["twenty", 20],
+    ];
+    const chWord = t.match(/\b(?:chapter|ch)\.?\s+([a-z]+)/i);
+    if (chWord?.[1]) {
+      const found = wordNums.find(([w]) => w === chWord[1].toLowerCase());
+      if (found) chapter = found[1];
+    }
   }
 
   // Grade
