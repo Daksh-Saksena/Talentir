@@ -563,6 +563,7 @@ export default function LiveClassPage() {
 
       // ── Calculate if we should advance stage or skip AI visual plan ─────────
       const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
+      const timeOnScreenSecs = Math.round(timeSinceLastUpdate / 1000);
       const minDisplayMs = 15000; // 15s minimum per visual
       const shouldAdvance = !sameBlock || !activeMediaRef.current || timeSinceLastUpdate >= minDisplayMs || isTrigger;
 
@@ -590,6 +591,10 @@ export default function LiveClassPage() {
 
       const conceptMapKeys = Object.keys(CONCEPT_MAPS).join(", ");
 
+      const timeOnScreenHint = activeMediaRef.current
+        ? `The current visual has been on screen for ${timeOnScreenSecs} seconds.`
+        : "No visual is currently displayed.";
+
       const prompt = `You are an expert visual teaching assistant in a CBSE Grade 11 Accountancy classroom.
 
       PIPELINE: Teaching Block Detection -> Visual Stage -> Visual Plan
@@ -608,10 +613,13 @@ export default function LiveClassPage() {
       Recently Used: [${recentStylesStr}]
       RULE: NEVER repeat a recently used style. Rotate deliberately.
 
+      ${timeOnScreenHint}
       VISUAL TYPE RULES:
-      - "type" must be one of: "image" | "formula" | "none".
-      - Use "none" ONLY for pure greetings.
-      - Use "formula" when the teacher states an accounting equation (search_query must match formula list).
+      - "type" must be one of: "image" | "formula" | "none" | "keep_current".
+      - "keep_current": Use this if the current visual is STILL highly relevant and you would just suggest another very similar image. Do NOT swap just to swap! We want visuals to stay on screen for 15-30 seconds to avoid chaotic rapid switching.
+      - Only output a new "image" if the teaching stage has significantly changed, the current image no longer matches, or it has been over 30 seconds.
+      - "formula": Use when the teacher states an accounting equation.
+      - "none": Use ONLY for pure greetings.
 
       CONCEPT MAP: Available block names: [${conceptMapKeys}]
       If block_name matches one, return covered_subtopics (array of string labels that were mentioned).
@@ -651,7 +659,7 @@ export default function LiveClassPage() {
         "block_name": "the current teaching block name",
         "teaching_intent": "what student should understand in one sentence",
         "homework": ["string"],
-        "type": "image"|"formula"|"none",
+        "type": "image"|"formula"|"none"|"keep_current",
         "primary_visual": { "type": "style string", "query": "search query" },
         "alternatives": [
           { "type": "style string", "query": "search query" },
@@ -722,7 +730,9 @@ export default function LiveClassPage() {
       }
 
       // ── Parallel Multi-Search & Pool Selection ──────────────────────────────
-      if (dec.type !== "none" && !isFetchingVisualRef.current) {
+      if (dec.type === "keep_current") {
+        console.log("[Visual Plan] AI decided to keep current visual.");
+      } else if (dec.type !== "none" && !isFetchingVisualRef.current) {
         isFetchingVisualRef.current = true;
         try {
           if (dec.type === "formula") {
