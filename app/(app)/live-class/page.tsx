@@ -54,95 +54,8 @@ const SIMS: Record<string, string> = {
   'gravity-space':'gravity-force-lab-basics','plate-tectonics':'plate-tectonics',
 };
 
-// CBSE Grade 11 Accountancy — curated topic → ideal image search key mapping
-const ACCOUNTING_VISUALS: Record<string, string> = {
-  // Ch 1 — Introduction to Accounting
-  'accounting introduction':      'accounting introduction infographic business',
-  'users of accounting':          'users of accounting information stakeholders chart',
-  'qualitative characteristics':  'qualitative characteristics accounting information diagram',
-  'accounting objectives':        'objectives of accounting infographic',
-  // Ch 2 — Basic Accounting Terms
-  'business entity':              'business entity concept accounting diagram',
-  'assets liabilities capital':   'assets liabilities capital accounting equation chart',
-  'debtors creditors':            'debtors creditors accounts receivable payable diagram',
-  'revenue expenses':             'revenue expenses profit loss accounting infographic',
-  'trade discount cash discount': 'trade discount cash discount difference table',
-  'voucher source document':      'accounting voucher source document types infographic',
-  'goods stock inventory':        'goods stock inventory accounting diagram',
-  // Ch 3 — Theory Base of Accounting
-  'accounting concepts':          'fundamental accounting concepts conventions chart',
-  'going concern':                'going concern concept accounting diagram',
-  'accrual basis':                'accrual basis cash basis accounting comparison',
-  'matching concept':             'matching concept revenue expenses accounting',
-  'dual aspect':                  'dual aspect concept double entry system diagram',
-  'money measurement':            'money measurement concept accounting limitation',
-  'conservatism':                 'conservatism concept prudence accounting',
-  'consistency':                  'consistency principle accounting standards',
-  'accounting standards':         'accounting standards GAAP India infographic',
-  'gst':                          'GST goods services tax India chart explanation',
-  // Ch 4 — Accounting Equation
-  'accounting equation':          'accounting equation assets liabilities capital diagram',
-  // Ch 5 — Journal
-  'journal':                      'accounting journal entry format ledger book',
-  'journal entry':                'accounting journal entry debit credit format',
-  'debit credit rules':           'debit credit rules accounting golden rules chart',
-  'golden rules':                 'golden rules of accounting debit credit chart',
-  'double entry':                 'double entry bookkeeping system diagram',
-  // Ch 6 — Ledger
-  'ledger':                       'ledger account T account format accounting',
-  'ledger posting':               'ledger posting from journal to ledger diagram',
-  'balancing ledger':             'balancing ledger accounts closing balance',
-  // Ch 7 — Special Purpose Books
-  'cash book':                    'cash book format single column double column accounting',
-  'petty cash book':              'petty cash book format imprest system accounting',
-  'purchase book':                'purchases book format accounting daybook',
-  'sales book':                   'sales book format accounting daybook',
-  'purchase return book':         'purchase returns book format accounting',
-  'sales return book':            'sales returns book format accounting',
-  'special purpose books':        'special purpose subsidiary books accounting diagram',
-  // Ch 8 — Bank Reconciliation Statement
-  'bank reconciliation':          'bank reconciliation statement format BRS',
-  'brs':                          'bank reconciliation statement passbook cashbook difference',
-  'passbook':                     'bank passbook account statement format',
-  'bank statement':               'bank statement reconciliation accounting format',
-  'unpresented cheque':           'bank reconciliation outstanding cheque passbook diagram',
-  // Ch 9 — Trial Balance
-  'trial balance':                'trial balance format debit credit accountancy',
-  'errors trial balance':         'errors in trial balance classification accounting',
-  'suspense account':             'suspense account rectification errors accounting',
-  // Ch 10 — Rectification of Errors
-  'rectification errors':         'rectification of errors accounting journal entry',
-  'errors of omission':           'errors of omission commission accounting types',
-  'compensating errors':          'compensating errors accounting explanation',
-  // Ch 11 — Depreciation
-  'depreciation':                 'depreciation concept fixed asset accounting diagram',
-  'straight line method':         'straight line method depreciation graph chart',
-  'slm depreciation':             'straight line depreciation SLM formula chart accountancy',
-  'written down value':           'written down value WDV depreciation declining chart',
-  'wdv depreciation':             'WDV written down value depreciation method comparison',
-  'depreciation methods':         'SLM WDV depreciation methods comparison chart',
-  'causes of depreciation':       'causes of depreciation wear tear obsolescence diagram',
-  // Ch 12 — Provisions and Reserves
-  'provisions':                   'provisions reserves accounting difference diagram',
-  'reserves':                     'reserves types revenue capital accounting chart',
-  'provision bad debts':          'provision for bad debts doubtful debts accounting',
-  'general reserve':              'general reserve capital reserve specific reserve diagram',
-  // Ch 13 — Bills of Exchange
-  'bill of exchange':             'bill of exchange format drawer drawee payee accounting',
-  'promissory note':              'promissory note format accounting negotiable instrument',
-  // Ch 14 — Financial Statements
-  'trading account':              'trading account format gross profit accounting',
-  'profit loss account':          'profit and loss account format net profit accounting',
-  'balance sheet':                'balance sheet format assets liabilities T account',
-  'financial statements':         'financial statements income statement balance sheet diagram',
-  'gross profit':                 'gross profit calculation formula accounting',
-  'net profit':                   'net profit calculation operating expenses accounting',
-  'working capital':              'working capital current assets liabilities accounting',
-  'adjustments':                  'adjustments in final accounts prepaid accrued accounting',
-  'prepaid expenses':             'prepaid expenses outstanding accrued accounting adjustment',
-  'accrued income':               'accrued income unearned revenue accounting adjustment',
-  'closing stock':                'closing stock trading account adjustment accounting',
-};
+import { VISUAL_STYLES, CONCEPT_VISUAL_TAXONOMY, CONCEPT_MAPS, ConceptNode } from "./accounting-graph";
+
 
 // Accounting formula library — used by the formula card renderer
 const ACCOUNTING_FORMULAS: Record<string, { label: string; formula: string; note: string }> = {
@@ -172,6 +85,16 @@ export default function LiveClassPage() {
   const [activeMedia, _setActiveMedia] = useState<{type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null>(null);
   const activeMediaRef = useRef<{type: string, key: string} | null>(null);
   const lastUpdateTimeRef = useRef<number>(0);
+  const recentStylesRef = useRef<string[]>([]);          // last 5 visual types this lesson
+  const isFetchingVisualRef = useRef(false);
+  // ── Teaching Block Engine ──────────────────────────────────────────────────
+  const teachingBlockRef = useRef<{
+    name: string;          // e.g. "Depreciation"
+    stage: number;         // 1-indexed depth within this block
+    history: string[];     // visual types shown so far in this block
+    startTime: number;
+  } | null>(null);
+  const lessonVisualHistoryRef = useRef<string[]>([]);  // last 15 visual types this lesson
 
   const setActiveMedia = (media: {type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null) => {
     _setActiveMedia(media);
@@ -195,6 +118,8 @@ export default function LiveClassPage() {
   const todosRef = useRef<string[]>([]);
   todosRef.current = todos;
   const [liveTranscript, setLiveTranscript] = useState<string[]>([]);
+  const [conceptMap, setConceptMap] = useState<ConceptNode[] | null>(null);
+  const [blockStage, setBlockStage] = useState<{ name: string; stage: number; total: number } | null>(null);
   
   // QUIZ, Q&A, ADHD
   const [quiz, setQuiz] = useState<{q: string, options: string[], answer: number} | null>(null);
@@ -596,8 +521,6 @@ export default function LiveClassPage() {
     } catch(e) {}
   };
 
-
-
   const manualSync = () => handleHeardSpeech("MANUAL_SYNC_TRIGGER");
 
   const handleHeardSpeech = async (text: string) => {
@@ -610,141 +533,279 @@ export default function LiveClassPage() {
 
     const context = transcriptBuffer.current.join(" ");
     if (!context.trim()) {
-      if (isTrigger) {
-        setActiveMedia(null);
-      }
+      if (isTrigger) setActiveMedia(null);
       setThinking("Active");
       return;
     }
 
     setThinking("AI Thinking...");
     try {
-      const simKeys = Object.keys(SIMS).join(', ');
-      // Build accountancy visuals reference string for prompt injection
-      const accountingVisualsRef = Object.entries(ACCOUNTING_VISUALS)
-        .map(([k, v]) => `"${k}" -> search "${v}"`).join('\n       ');
+      // ── STAGE A: Teaching Block Detection ──────────────────────────────────
+      // Cheap, fast call: are we still in the same teaching block?
+      const currentBlock = teachingBlockRef.current;
+      let sameBlock = false;
+      let resolvedBlockName = currentBlock?.name || "";
+
+      if (currentBlock && !isTrigger) {
+        const blockCheckPrompt = `Current teaching block: "${currentBlock.name}". New transcript: "${context}". Is the teacher still explaining "${currentBlock.name}" or has the topic clearly shifted to something different? Reply ONLY valid JSON: {"same_block": true or false, "new_block_name": "if different, what is the new topic, else empty string"}`;
+        const blockCheckRes = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: blockCheckPrompt }], response_format: { type: "json_object" }, max_tokens: 60 })
+        });
+        const blockCheckData = await blockCheckRes.json();
+        const blockCheck = JSON.parse(blockCheckData.choices[0].message.content);
+        sameBlock = !!blockCheck.same_block;
+        if (!sameBlock && blockCheck.new_block_name) {
+          resolvedBlockName = blockCheck.new_block_name;
+        }
+      }
+
+      // ── Calculate if we should advance stage or skip AI visual plan ─────────
+      const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
+      const minDisplayMs = 15000; // 15s minimum per visual
+      const shouldAdvance = !sameBlock || !activeMediaRef.current || timeSinceLastUpdate >= minDisplayMs || isTrigger;
+
+      if (!shouldAdvance && !isFetchingVisualRef.current) {
+        setThinking("Active");
+        return;
+      }
+
+      // ── STAGE B: Visual Plan Generation ────────────────────────────────────
+      const recentStylesStr = recentStylesRef.current.length > 0 ? recentStylesRef.current.join(", ") : "None yet";
+      const availableStyles = VISUAL_STYLES.join(", ");
       const accountingFormulasRef = Object.entries(ACCOUNTING_FORMULAS)
         .map(([k, v]) => `"${k}" -> formula "${v.formula}" (${v.label})`).join('\n       ');
 
-      const prompt = `Transcript: "${context}". Current Todo List: ${JSON.stringify(todosRef.current)}.
+      // Build taxonomy hint if we know the block
+      const blockNameLower = (resolvedBlockName || context).toLowerCase();
+      const taxonomyMatch = Object.entries(CONCEPT_VISUAL_TAXONOMY).find(([key]) => blockNameLower.includes(key));
+      const taxonomyHint = taxonomyMatch
+        ? `Visual Taxonomy for "${taxonomyMatch[0]}": ${JSON.stringify(taxonomyMatch[1])}`
+        : "";
 
-      You are an expert visual teaching assistant in a CBSE Grade 11 Accountancy classroom in India.
-      The class is already several months into the syllabus. DO NOT show generic introductory chapter cover images unless the teacher is explicitly revising fundamentals.
-      Your job is to act as a dynamic teaching aid that tightly follows the teacher's current explanation at the sentence or paragraph level, focusing on subtopics and specific examples.
+      const blockStageHint = currentBlock && sameBlock
+        ? `We are at visual stage ${currentBlock.stage + 1} for this block. Show something DEEPER than previous stage.`
+        : `This is a NEW teaching block: "${resolvedBlockName || 'unknown'}". Start at stage 1.`;
+
+      const conceptMapKeys = Object.keys(CONCEPT_MAPS).join(", ");
+
+      const prompt = `You are an expert visual teaching assistant in a CBSE Grade 11 Accountancy classroom.
+
+      PIPELINE: Teaching Block Detection -> Visual Stage -> Visual Plan
+      TEACHING BLOCK: "${resolvedBlockName || 'detecting...'}"
+      ${blockStageHint}
+      ${taxonomyHint}
+
+      TRANSCRIPT: "${context}"
+      Current Todo List: ${JSON.stringify(todosRef.current)}.
+
+      YOUR TASK: Design a full Visual Plan (not a single search query). Think like an experienced teacher:
+      "What scene would help a Grade 11 student understand this in 5 seconds?"
+
+      VISUAL DIVERSITY ENGINE:
+      Available Styles: [${availableStyles}]
+      Recently Used: [${recentStylesStr}]
+      RULE: NEVER repeat a recently used style. Rotate deliberately.
 
       VISUAL TYPE RULES:
-      - "type" must be one of: "sim" | "gif" | "image" | "formula" | "none".
-      - Use "none" ONLY for: pure greetings, roll call, classroom management ("sit down", "quiet", "hello class", "let us begin", "open your books").
-      - Use "sim" ONLY if the topic EXACTLY matches a PhET simulation key: [${simKeys}].
-      - Use "formula" when the teacher explains an accounting equation or formula. Set "key" to the EXACT formula key listed below.
-      - Use "image" for accountancy concepts, formats, diagrams, charts, flowcharts, transaction illustrations, T-accounts, and balance sheet layouts.
+      - "type" must be one of: "image" | "formula" | "none".
+      - Use "none" ONLY for pure greetings.
+      - Use "formula" when the teacher states an accounting equation (search_query must match formula list).
 
-      IMAGE SEARCH STRATEGY:
-      - Track subtopics and specific examples closely (e.g. "furniture purchase", "bank loan", "inventory valuation", "drawings", "depreciation", "journal entry", "balance sheet").
-      - Prioritize educational diagrams, infographics, textbook figures, transaction illustrations, T-account visuals, and labeled educational graphics over generic photos.
-      - When the teacher explains a specific transaction or concept, generate a highly targeted search key.
-      - Examples of good keys: "furniture purchase journal entry diagram", "bank loan accounting treatment chart", "T-account format example", "balance sheet asset side illustration".
-      - NEVER use a single generic word like "journal", "ledger", "balance" — always append "accounting diagram", "format", "transaction illustration", etc.
+      CONCEPT MAP: Available block names: [${conceptMapKeys}]
+      If block_name matches one, return covered_subtopics (array of string labels that were mentioned).
 
-      ACCOUNTANCY IMAGE SEARCH MAP (Use as a base reference, but you CAN and SHOULD invent highly specific search terms for subtopics/examples not covered here):
-       ${accountingVisualsRef}
+      TEACHING INTENT EXAMPLES (follow this reasoning pattern):
+      1. Teacher: "Furniture purchased for cash" -> intent: "Asset swap: one asset up, one down. Total unchanged."
+         primary: { type: "Process flow", query: "cash paid for office furniture exchange transaction diagram" }
+         alternatives: [
+           { type: "Before vs After comparison", query: "before after balance sheet cash furniture asset swap" },
+           { type: "Illustration", query: "businessman buying furniture office illustration" },
+           { type: "T-account visualization", query: "furniture account debit cash account credit T-account" }
+         ]
 
-      ACCOUNTING FORMULA KEYS (when type is "formula", set "key" to EXACTLY one of these):
+      2. Teacher: "Owner invests capital" -> intent: "Cash and Capital both increase. Equation stays balanced."
+         primary: { type: "Illustration", query: "owner handing money to business illustration" }
+         alternatives: [
+           { type: "Before vs After comparison", query: "capital investment before after accounting equation" },
+           { type: "Infographic", query: "owner equity capital accounting infographic" },
+           { type: "Real-world photograph", query: "entrepreneur investing startup funding" }
+         ]
+
+      3. Teacher: "Let us talk about depreciation, why do assets lose value" -> intent: "Assets physically deteriorate."
+         primary: { type: "Real-world photograph", query: "old worn out machinery factory equipment" }
+         alternatives: [
+           { type: "Illustration", query: "asset wear and tear decreasing value illustration" },
+           { type: "Timeline", query: "asset value decreasing over years timeline" },
+           { type: "Infographic", query: "causes of depreciation wear obsolescence infographic" }
+         ]
+
+      ACCOUNTING FORMULA KEYS:
        ${accountingFormulasRef}
-      If the formula is not in the list, write it out as a clear string like "GP = Net Sales - COGS".
 
-      TODO LIST RULES:
-      - You are given the "Current Todo List" of tasks already assigned this class.
-      - If the teacher adds to an existing task (e.g. previously "Do ex 6.2 Q1-2" and now adds "Q3"), MERGE them into one item.
-      - Do not delete items unless the teacher explicitly cancels them. Return the COMPLETE updated list in "homework".
-      - Extract tasks ONLY if the teacher explicitly assigns them as NEW future requirements.
-      - CRITICAL: Do NOT extract past homework checks (e.g. "I hope you finished...", "last class we did...", "catch up on..."). Only extract newly assigned tasks.
-      - Prefix a task with "(HW) " ONLY if the teacher explicitly calls it homework or HW.
+      TODO LIST RULES: Return the COMPLETE merged list. Do not extract past homework checks.
 
-      EXAMPLES:
-      1. Transcript: "For example, if we purchase furniture for 50,000 cash, what happens? Furniture comes in, cash goes out."
-         Output: {"topic":"Furniture Purchase Transaction","summary":"Explaining the accounting treatment of purchasing an asset for cash.","homework":[],"type":"image","key":"furniture purchase journal entry diagram accountancy","caption":"Furniture A/c Dr. to Cash A/c"}
+      Reply ONLY valid JSON:
+      {
+        "block_name": "the current teaching block name",
+        "teaching_intent": "what student should understand in one sentence",
+        "homework": ["string"],
+        "type": "image"|"formula"|"none",
+        "primary_visual": { "type": "style string", "query": "search query" },
+        "alternatives": [
+          { "type": "style string", "query": "search query" },
+          { "type": "style string", "query": "search query" },
+          { "type": "style string", "query": "search query" }
+        ],
+        "covered_subtopics": ["label strings from concept map that were mentioned"],
+        "caption": "student-friendly explanation"
+      }`;
 
-      2. Transcript: "Today we will learn about the accounting equation. Assets equals liabilities plus capital. This is the backbone of all accounting."
-         Output: {"topic":"Accounting Equation","summary":"Introducing the fundamental accounting equation.","homework":[],"type":"formula","key":"accounting equation","caption":"Assets = Liabilities + Capital — the foundation of double-entry bookkeeping"}
-
-      3. Transcript: "Let us look at a T-account for cash. We record all receipts on the debit side and payments on the credit side."
-         Output: {"topic":"Cash T-Account","summary":"Explaining how to record transactions in a Cash T-account.","homework":[],"type":"image","key":"cash T-account format example illustration","caption":"Cash Account in T-format showing debit (receipts) and credit (payments)"}
-
-      4. Transcript: "Good morning class. Open your books to chapter five. Let us begin."
-         Output: {"topic":"Intro","summary":"Starting the class.","homework":[],"type":"none","key":"","caption":""}
-
-      Reply ONLY valid JSON: {"topic":"string","summary":"string","homework":["string"],"type":"sim"|"gif"|"image"|"formula"|"none","key":"string","caption":"why this visual helps"}`;
-      
       const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
         body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } })
       });
       const d = await r.json();
       const dec = JSON.parse(d.choices[0].message.content);
-      
-      if (dec.topic) setTopic(dec.topic);
-      if (dec.summary) setSummary(dec.summary);
+
+      // ── Update Teaching Block State ─────────────────────────────────────────
+      const newBlockName = dec.block_name || resolvedBlockName || "Unknown";
+      if (!currentBlock || !sameBlock) {
+        // New block started
+        teachingBlockRef.current = { name: newBlockName, stage: 1, history: [], startTime: Date.now() };
+        // Load concept map if available
+        const mapKey = Object.keys(CONCEPT_MAPS).find(k => newBlockName.toLowerCase().includes(k));
+        setConceptMap(mapKey ? JSON.parse(JSON.stringify(CONCEPT_MAPS[mapKey])) : null);
+      } else {
+        // Advance stage within same block
+        teachingBlockRef.current = {
+          ...currentBlock,
+          stage: currentBlock.stage + 1,
+        };
+      }
+
+      // Update covered subtopics in concept map
+      if (dec.covered_subtopics && Array.isArray(dec.covered_subtopics) && dec.covered_subtopics.length > 0) {
+        setConceptMap(prev => {
+          if (!prev) return prev;
+          const markCovered = (nodes: ConceptNode[]): ConceptNode[] =>
+            nodes.map(n => ({
+              ...n,
+              covered: n.covered || dec.covered_subtopics.some((s: string) => n.label.toLowerCase().includes(s.toLowerCase())),
+              children: n.children ? markCovered(n.children) : undefined,
+            }));
+          return markCovered(prev);
+        });
+      }
+
+      // Update block stage UI
+      const taxEntry = taxonomyMatch?.[1];
+      setBlockStage(teachingBlockRef.current ? {
+        name: teachingBlockRef.current.name,
+        stage: teachingBlockRef.current.stage,
+        total: taxEntry ? taxEntry.length : 8,
+      } : null);
+
+      // Update topic and teaching intent
+      if (newBlockName) setTopic(newBlockName);
+      if (dec.teaching_intent) setSummary(dec.teaching_intent);
+
       if (dec.homework && Array.isArray(dec.homework)) {
         const hasCancellation = context.toLowerCase().match(/cancel|remove|clear|scratch|delete|forget|no need to/);
         if (dec.homework.length === 0 && todosRef.current.length > 0 && !hasCancellation) {
-          // Keep existing todos to protect against LLM forgetfulness
+          // Keep existing todos
         } else {
           setTodos(dec.homework);
         }
       }
 
-      if (dec.type !== "none") {
-          const isDifferentVisual = 
-            !activeMediaRef.current || 
-            activeMediaRef.current.key.toLowerCase().trim() !== dec.key.toLowerCase().trim() || 
-            activeMediaRef.current.type !== dec.type;
-          
-          const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
-          const minGap = isDifferentVisual ? 10000 : 20000;
-          const isFirstMedia = !activeMediaRef.current;
-          
-          if (isFirstMedia || timeSinceLastUpdate >= minGap || isTrigger) {
-              let finalUrl: string | null = null;
-              if (dec.type === "sim") {
-                if (!SIMS[dec.key]) return;
-              } else if (dec.type === "formula") {
-                // Formulas are text, ready instantly
-              } else {
-                if (dec.type === "gif") finalUrl = await fetchGoogleImages(dec.key, true);
-                if (!finalUrl && (dec.type === "image" || dec.type === "gif")) finalUrl = await fetchGoogleImages(dec.key, false);
-                // Fallback to Wikipedia if Google Search returns nothing
-                if (!finalUrl && dec.type !== "sim" && dec.type !== "formula") finalUrl = await fetchWikiMedia(dec.key);
-                
-                // If we couldn't find any visual, keep the current visual on screen and do not switch
-                if (!finalUrl) return;
+      // ── Parallel Multi-Search & Pool Selection ──────────────────────────────
+      if (dec.type !== "none" && !isFetchingVisualRef.current) {
+        isFetchingVisualRef.current = true;
+        try {
+          if (dec.type === "formula") {
+            const formulaKey = dec.primary_visual?.query || "";
+            activeMediaRef.current = { type: "formula", key: formulaKey };
+            lastUpdateTimeRef.current = Date.now();
+            setIsRefreshing(true);
+            setTimeout(() => {
+              setActiveMedia({ type: "formula", key: formulaKey, caption: dec.caption });
+              setIsRefreshing(false);
+            }, 600);
+          } else if (dec.type === "image") {
+            // Collect all queries: primary + alternatives
+            const primaryQuery = dec.primary_visual?.query || "";
+            const altQueries: string[] = (dec.alternatives || []).map((a: { type: string; query: string }) => a.query).filter(Boolean);
+            const allQueries = [primaryQuery, ...altQueries].filter(Boolean).slice(0, 4);
 
-                // Pre-load the image in the background so it's fully ready before switching
-                try {
-                  await new Promise((resolve) => {
-                    const img = new Image();
-                    img.src = finalUrl!;
-                    img.onload = () => resolve(true);
-                    img.onerror = () => resolve(false);
-                    setTimeout(() => resolve(false), 5000); // 5s timeout max
-                  });
-                } catch (e) {
-                  console.log("Preload failed, switching anyway");
-                }
-              }
+            // Fire all searches in parallel
+            const searchResults = await Promise.allSettled(
+              allQueries.map(q => fetchGoogleImages(q, false))
+            );
 
-              // Now we have the next visual ready! Trigger a quick transition
-              setIsRefreshing(true);
-              setTimeout(() => {
-                if (dec.type === "sim") setActiveMedia({ type: "sim", key: SIMS[dec.key], caption: dec.caption });
-                else if (dec.type === "formula") setActiveMedia({ type: "formula", key: dec.key, caption: dec.caption });
-                else if (finalUrl) setActiveMedia({ type: "image", key: dec.key, caption: dec.caption, url: finalUrl });
-                setIsRefreshing(false);
-              }, 150);
+            // Pool all successful results
+            const pool: string[] = searchResults
+              .filter((r): r is PromiseFulfilledResult<string | null> => r.status === "fulfilled" && r.value !== null)
+              .map(r => r.value as string)
+              .filter(Boolean);
+
+            if (pool.length === 0) {
+              console.log("[Visual Plan] All searches returned no results, keeping current visual.");
+              return;
+            }
+
+            // Pick a candidate from the pool (prefer variety — avoid same URL as current)
+            const currentUrl = activeMediaRef.current?.key || "";
+            const freshPool = pool.filter(url => url !== currentUrl);
+            const finalUrl = freshPool.length > 0
+              ? freshPool[Math.floor(Math.random() * freshPool.length)]
+              : pool[0];
+
+            // Preload image before switching
+            const isLoaded = await new Promise<boolean>(resolve => {
+              const img = new Image();
+              img.src = finalUrl;
+              img.onload = () => resolve(true);
+              img.onerror = () => resolve(false);
+              setTimeout(() => resolve(false), 5000);
+            });
+
+            if (!isLoaded) {
+              console.log("[Visual Plan] Chosen image failed preload, aborting.");
+              return;
+            }
+
+            // Record style for diversity enforcement
+            const chosenStyle = dec.primary_visual?.type || "";
+            if (chosenStyle) {
+              recentStylesRef.current.push(chosenStyle);
+              if (recentStylesRef.current.length > 10) recentStylesRef.current.shift();
+              lessonVisualHistoryRef.current.push(chosenStyle);
+              if (lessonVisualHistoryRef.current.length > 20) lessonVisualHistoryRef.current.shift();
+            }
+
+            activeMediaRef.current = { type: "image", key: finalUrl };
+            lastUpdateTimeRef.current = Date.now();
+            setIsRefreshing(true);
+            setTimeout(() => {
+              setActiveMedia({ type: "image", key: finalUrl, caption: dec.caption, url: finalUrl });
+              setIsRefreshing(false);
+            }, 600);
           }
-      } else if (isTrigger) setActiveMedia(null);
+        } finally {
+          isFetchingVisualRef.current = false;
+        }
+      } else if (isTrigger) {
+        setActiveMedia(null);
+      }
+
       setThinking("Active");
-    } catch (e: any) { setThinking("Error"); }
+    } catch (e: any) {
+      console.error("AI Error:", e);
+      setThinking("Error");
+    }
   };
 
   // Fetch from Google Images via Serper.dev API — picks a RANDOM image from top results for variety
@@ -832,25 +893,74 @@ export default function LiveClassPage() {
          </div>
       )}
 
-      {/* TOP TOPIC BANNER */}
+      {/* TOP TOPIC BANNER — shows block name + stage progress */}
       <div className="absolute top-8 inset-x-0 z-50 flex justify-center pointer-events-none">
-         <div className="px-10 py-3 bg-white/5 backdrop-blur-2xl border border-white/10 rounded-full shadow-2xl animate-fade-in">
-            <span className="text-[10px] uppercase tracking-[0.6em] text-white/30 font-black mr-4">Topic:</span>
-            <span className="text-sm font-bold tracking-widest text-indigo-400 uppercase drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">{topic}</span>
+         <div className="flex flex-col items-center gap-2">
+           <div className="px-10 py-3 bg-white/5 backdrop-blur-2xl border border-white/10 rounded-full shadow-2xl animate-fade-in flex items-center gap-4">
+             <span className="text-[10px] uppercase tracking-[0.6em] text-white/30 font-black">Teaching Block:</span>
+             <span className="text-sm font-bold tracking-widest text-indigo-400 uppercase drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">{topic}</span>
+             {blockStage && (
+               <span className="text-[9px] font-mono text-emerald-400/70 border border-emerald-400/20 px-2 py-0.5 rounded-full">
+                 Stage {blockStage.stage}/{blockStage.total}
+               </span>
+             )}
+           </div>
+           {/* Stage progress bar */}
+           {blockStage && (
+             <div className="w-48 h-0.5 bg-white/5 rounded-full overflow-hidden">
+               <div
+                 className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full transition-all duration-1000"
+                 style={{ width: `${Math.min(100, (blockStage.stage / blockStage.total) * 100)}%` }}
+               />
+             </div>
+           )}
          </div>
       </div>
 
-      {/* LEFT SUMMARY PANEL */}
+      {/* LEFT SUMMARY + CONCEPT MAP PANEL */}
       <div className="absolute left-6 top-1/2 -translate-y-1/2 w-72 z-50 pointer-events-none flex flex-col gap-4">
-         <div className="p-8 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[40px] shadow-2xl animate-fade-in flex flex-col gap-4">
+         {/* Teaching Intent */}
+         <div className="p-6 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3">
             <div className="flex items-center gap-3">
                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
-               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/40">Live Summary</span>
+               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/40">Teaching Intent</span>
             </div>
-            <p className="text-sm leading-relaxed text-white/80 font-medium tracking-wide">
-               {summary}
-            </p>
+            <p className="text-xs leading-relaxed text-white/70 font-medium tracking-wide">{summary}</p>
          </div>
+
+         {/* Concept Map */}
+         {conceptMap && conceptMap.length > 0 && (
+           <div className="p-5 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[32px] shadow-2xl animate-fade-in">
+             <div className="flex items-center gap-2 mb-4">
+               <span className="text-[9px] uppercase tracking-[0.4em] font-black text-white/30">Concept Map</span>
+               <div className="flex-1 h-px bg-white/5" />
+             </div>
+             <div className="flex flex-col gap-1.5">
+               {conceptMap.map((node, i) => (
+                 <div key={i}>
+                   <div className="flex items-center gap-2">
+                     <span className={`text-[10px] ${node.covered ? 'text-emerald-400' : 'text-white/20'}`}>
+                       {node.covered ? '✓' : '○'}
+                     </span>
+                     <span className={`text-[11px] font-medium ${node.covered ? 'text-white/80' : 'text-white/25'}`}>
+                       {node.label}
+                     </span>
+                   </div>
+                   {node.children && node.children.map((child, j) => (
+                     <div key={j} className="flex items-center gap-2 ml-4 mt-1">
+                       <span className={`text-[9px] ${child.covered ? 'text-emerald-400/70' : 'text-white/10'}`}>
+                         {child.covered ? '✓' : '·'}
+                       </span>
+                       <span className={`text-[10px] ${child.covered ? 'text-white/60' : 'text-white/15'}`}>
+                         {child.label}
+                       </span>
+                     </div>
+                   ))}
+                 </div>
+               ))}
+             </div>
+           </div>
+         )}
       </div>
 
       {/* BOTTOM RIGHT TODO PANEL */}
@@ -1018,7 +1128,7 @@ export default function LiveClassPage() {
 
       {/* Main Content Area */}
       <div className="flex-1 relative z-10 flex items-center justify-center px-24">
-        <div className={`w-full h-full transition-all duration-300 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
+        <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
            {activeMedia ? (
             <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
                {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none" allowFullScreen /> )}
