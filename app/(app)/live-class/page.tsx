@@ -192,6 +192,9 @@ export default function LiveClassPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("preview") === "true") return;
+
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SR) {
         nativeRecognitionRef.current = new SR();
@@ -208,6 +211,10 @@ export default function LiveClassPage() {
   }, [isListening]);
 
   const startDeepgram = async () => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("preview") === "true") return;
+    }
     if (!deepgramKey) { nativeRecognitionRef.current?.start(); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -231,6 +238,27 @@ export default function LiveClassPage() {
     mediaRecorderRef.current?.stream.getTracks().forEach(track => track.stop());
     nativeRecognitionRef.current?.stop();
   };
+
+  // Cross-origin window.postMessage state synchronization for controller preview
+  useEffect(() => {
+    const handleWindowMessage = (event: MessageEvent) => {
+      const { type, data } = event.data || {};
+      if (type === "sync_state" && data) {
+        if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
+        if (data.summary !== undefined) setSummary(data.summary);
+        if (data.todos !== undefined) setTodos(data.todos);
+        if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
+        if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
+        if (data.topic !== undefined) setTopic(data.topic);
+        if (data.isListening !== undefined) setIsListening(data.isListening);
+        if (data.calmMode !== undefined) setCalmMode(data.calmMode);
+        if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
+        if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+      }
+    };
+    window.addEventListener("message", handleWindowMessage);
+    return () => window.removeEventListener("message", handleWindowMessage);
+  }, []);
 
   // FACE RECOGNITION + EXPRESSION + MOUTH DETECTION ENGINE (Disabled for now per user request)
   useEffect(() => {
@@ -368,6 +396,25 @@ export default function LiveClassPage() {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isListening, attendanceIndex]);
+
+  // Auto-start class session & listening engines on page load/mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("preview") === "true") return;
+    }
+    if (apiKey) {
+      sessionStartRef.current = Date.now();
+      studentStatsRef.current = {};
+      setIsListening(true);
+      startDeepgram();
+      setLiveTranscript([]);
+      setRagStatus('loading');
+      lessonRAG.init(apiKey, (msg) => console.log('[LessonRAG]', msg))
+        .then(() => setRagStatus(lessonRAG.isReady ? 'ready' : 'error'))
+        .catch(() => setRagStatus('error'));
+    }
+  }, [apiKey]);
 
   const toggleSession = () => {
     if (isListening) {

@@ -128,6 +128,16 @@ export default function DemoControllerPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const handleIframeLoad = () => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({
+        type: "sync_state",
+        data: latestStateRef.current
+      }, "*");
+    }
+  };
 
   // Ref to hold the latest controller state to prevent stale closure bugs in the BroadcastChannel message handler
   const latestStateRef = useRef({
@@ -213,6 +223,13 @@ export default function DemoControllerPage() {
       type: "sync_state",
       data: changes
     });
+
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({
+        type: "sync_state",
+        data: changes
+      }, "*");
+    }
   };
 
   const loadPreset = (p: PresetItem) => {
@@ -313,7 +330,9 @@ export default function DemoControllerPage() {
           >
             {/* The scaled iframe inside */}
             <iframe 
-              src="/live-class" 
+              ref={iframeRef}
+              src="http://localhost:8000/live-class?preview=true" 
+              onLoad={handleIframeLoad}
               allow="microphone; camera; display-capture;"
               className="absolute border-none bg-black"
               style={{
