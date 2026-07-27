@@ -48,6 +48,8 @@ export interface PracticeTest {
   difficulty: "easy" | "medium" | "hard";
   questions: TestQuestion[];
   duration: number; // minutes
+  createdBy?: string;        // teacher name who created this quiz
+  isTeacherCreated?: boolean; // true = teacher-built, shown separately for students
 }
 
 export interface TestResult {
@@ -83,4 +85,15 @@ export interface AppNotification {
   type: "assignment" | "test" | "announcement" | "feedback";
   createdAt: string;
   read: boolean;
+}
+
+export interface StudentSubmission {
+  id: string;
+  assignmentId: string;
+  studentName: string;
+  fileName: string;
+  comments?: string;
+  submittedAt: string;
+  grade?: string;
+  feedback?: string;
 }

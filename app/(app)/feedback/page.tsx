@@ -14,8 +14,8 @@ export default function FeedbackPage() {
   const [message, setMessage] = useState("");
   const [rating, setRating] = useState(5);
 
-  useEffect(() => { 
-    setItems(getFeedback()); 
+  useEffect(() => {
+    setItems(getFeedback());
     setUsers(getUsers());
   }, []);
 
@@ -45,7 +45,7 @@ export default function FeedbackPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-white">Feedback</h2>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white">Feedback</h2>
         <button onClick={() => setShowForm(!showForm)}
           className="px-4 py-2 rounded-lg bg-indigo-600 text-xs font-bold text-white hover:bg-indigo-500 transition">
           {showForm ? "Cancel" : "+ Send Feedback"}
@@ -54,17 +54,17 @@ export default function FeedbackPage() {
 
       {/* Send form */}
       {showForm && (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-5 space-y-4">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 p-5 space-y-4 shadow-sm">
           <div className="space-y-1">
             <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Recipient</label>
-            <select 
-              value={to} 
+            <select
+              value={to}
               onChange={(e) => setTo(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none"
             >
-              <option value="">Select a {user?.role === "student" ? "Teacher" : "Student"}...</option>
+              <option value="" className="text-slate-500">Select a {user?.role === "student" ? "Teacher" : "Student"}...</option>
               {possibleRecipients.map(r => (
-                <option key={r.id} value={r.name} className="bg-slate-900">{r.name} ({r.role})</option>
+                <option key={r.id} value={r.name} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">{r.name} ({r.role})</option>
               ))}
             </select>
           </div>
@@ -73,14 +73,14 @@ export default function FeedbackPage() {
             <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Message</label>
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your feedback..."
               rows={3}
-              className="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/50" />
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/50" />
           </div>
 
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">Rating:</span>
             {[1, 2, 3, 4, 5].map((n) => (
               <button key={n} onClick={() => setRating(n)}
-                className={`text-xl transition ${n <= rating ? "text-yellow-400" : "text-slate-700"}`}>
+                className={`text-xl transition ${n <= rating ? "text-yellow-400" : "text-slate-300 dark:text-slate-700"}`}>
                 ★
               </button>
             ))}
@@ -95,21 +95,21 @@ export default function FeedbackPage() {
       {/* Feedback list */}
       <div className="space-y-3">
         {items.map((f) => (
-          <div key={f.id} className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 hover:border-slate-700 transition">
+          <div key={f.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-5 hover:border-slate-300 dark:hover:border-slate-700 transition shadow-sm">
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${f.fromRole === "teacher" ? "bg-purple-500/20 text-purple-300" : f.fromRole === "admin" ? "bg-red-500/20 text-red-300" : "bg-blue-500/20 text-blue-300"}`}>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${f.fromRole === "teacher" ? "bg-purple-500/20 text-purple-600 dark:text-purple-300" : f.fromRole === "admin" ? "bg-red-500/20 text-red-600 dark:text-red-300" : "bg-blue-500/20 text-blue-600 dark:text-blue-300"}`}>
                     {f.fromRole}
                   </span>
-                  <span className="text-xs text-slate-400">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
                     {f.from} → {f.to}
                   </span>
                 </div>
-                <p className="text-sm text-slate-200 mt-1">{f.message}</p>
+                <p className="text-sm text-slate-700 dark:text-slate-200 mt-1">{f.message}</p>
                 <div className="mt-2 flex items-center gap-1">
                   {Array.from({ length: 5 }, (_, i) => (
-                    <span key={i} className={`text-sm ${i < f.rating ? "text-yellow-400" : "text-slate-700"}`}>★</span>
+                    <span key={i} className={`text-sm ${i < f.rating ? "text-yellow-400" : "text-slate-300 dark:text-slate-700"}`}>★</span>
                   ))}
                 </div>
               </div>
