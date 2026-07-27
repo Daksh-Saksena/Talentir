@@ -314,6 +314,7 @@ export default function DemoControllerPage() {
             {/* The scaled iframe inside */}
             <iframe 
               src="/live-class" 
+              allow="microphone; camera; display-capture;"
               className="absolute border-none bg-black"
               style={{
                 width: "142.85%", // 100 / 0.7
