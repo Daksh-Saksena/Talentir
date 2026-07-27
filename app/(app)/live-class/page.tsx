@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 
 // PhET simulation map — 60+ simulations covering physics, chemistry, biology, math
@@ -1256,8 +1257,9 @@ Use the above textbook excerpts to:
         </div>
       </div>
 
-      {/* Session Toggle */}
-      <div className="absolute top-6 right-6 z-30 opacity-10 hover:opacity-100 transition-opacity">
+      {/* Session Toggle & Whiteboard Link */}
+      <div className="absolute top-6 right-6 z-30 flex items-center gap-3 opacity-10 hover:opacity-100 transition-opacity">
+         <Link href="/live-class/whiteboard" target="_blank" className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/5 bg-white/5 text-white/40 hover:text-white hover:bg-white/10" title="Open Interactive Whiteboard">🎨</Link>
          <button onClick={toggleSession} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/5 ${isListening ? "bg-white/10 text-white" : "bg-white/5 text-white/40"}`}>{isListening ? "⏹" : "▶"}</button>
       </div>
     </div>
