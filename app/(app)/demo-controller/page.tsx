@@ -76,6 +76,7 @@ export default function DemoControllerPage() {
   useAuth();
 
   // Controlled states
+  const [manualMode, setManualMode] = useState(false);
   const [topic, setTopic] = useState("Ready to Start");
   const [summary, setSummary] = useState("Listening for lecture points...");
   const [todos, setTodos] = useState<string[]>([]);
@@ -122,16 +123,39 @@ export default function DemoControllerPage() {
   };
 
   const [customImageUrl, setCustomImageUrl] = useState("");
-
   const [customImageCaption, setCustomImageCaption] = useState("");
   const [newTodoText, setNewTodoText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const channelRef = useRef<BroadcastChannel | null>(null);
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setUploadedImageUrl(dataUrl);
+      // Immediately push to the classroom
+      sync({
+        activeMedia: {
+          type: "image",
+          key: "upload_" + Date.now(),
+          caption: file.name.replace(/\.[^.]+$/, ""),
+          url: dataUrl,
+        }
+      });
+    };
+    reader.readAsDataURL(file);
+    // Reset file input so the same file can be re-selected
+    e.target.value = "";
+  };
+
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const handleIframeLoad = () => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
+    if (manualMode && iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.postMessage({
         type: "sync_state",
         data: latestStateRef.current
@@ -139,7 +163,7 @@ export default function DemoControllerPage() {
     }
   };
 
-  // Ref to hold the latest controller state to prevent stale closure bugs in the BroadcastChannel message handler
+  // Ref to hold the latest controller state to prevent stale closure bugs in event handlers
   const latestStateRef = useRef({
     topic,
     summary,
@@ -150,7 +174,8 @@ export default function DemoControllerPage() {
     isListening,
     calmMode,
     showAttendance,
-    attendanceIndex
+    attendanceIndex,
+    manualMode
   });
 
   useEffect(() => {
@@ -164,18 +189,22 @@ export default function DemoControllerPage() {
       isListening,
       calmMode,
       showAttendance,
-      attendanceIndex
+      attendanceIndex,
+      manualMode
     };
   });
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const channel = new BroadcastChannel("live-class-demo-sync");
-      channelRef.current = channel;
+    if (typeof window === "undefined") return;
 
-      const handleMessage = (event: MessageEvent) => {
-        const { type, data } = event.data;
-        if (type === "current_state" || type === "sync_state") {
+    // Listen for state updates sent UP from the live-class iframe via window.parent.postMessage.
+    // This works cross-origin (port 8000 -> port 4500) unlike BroadcastChannel which is same-origin only.
+    const handleMessage = (event: MessageEvent) => {
+      const { type, data } = event.data || {};
+      if (type === "classroom_state_update" && data) {
+        console.log("%c[Controller] Got classroom_state_update from iframe relay. manualMode:", "color:#f59e0b", latestStateRef.current.manualMode, "topic:", data.topic);
+        // Only mirror when NOT in manual override mode
+        if (!latestStateRef.current.manualMode) {
           if (data.topic !== undefined) setTopic(data.topic);
           if (data.summary !== undefined) setSummary(data.summary);
           if (data.todos !== undefined) setTodos(data.todos);
@@ -186,27 +215,16 @@ export default function DemoControllerPage() {
           if (data.calmMode !== undefined) setCalmMode(data.calmMode);
           if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
           if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
-        } else if (type === "request_state") {
-          // Respond to the newly mounted class view with the current controller state
-          channel.postMessage({
-            type: "sync_state",
-            data: latestStateRef.current
-          });
         }
-      };
+      }
+    };
 
-      channel.addEventListener("message", handleMessage);
-      channel.postMessage({ type: "request_state" });
-
-      return () => {
-        channel.removeEventListener("message", handleMessage);
-        channel.close();
-      };
-    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, []);
 
   const sync = (changes: any) => {
-    // Optimistically update controller state
+    // Optimistically update controller state locally
     if (changes.topic !== undefined) setTopic(changes.topic);
     if (changes.summary !== undefined) setSummary(changes.summary);
     if (changes.todos !== undefined) setTodos(changes.todos);
@@ -217,18 +235,16 @@ export default function DemoControllerPage() {
     if (changes.calmMode !== undefined) setCalmMode(changes.calmMode);
     if (changes.showAttendance !== undefined) setShowAttendance(changes.showAttendance);
     if (changes.attendanceIndex !== undefined) setAttendanceIndex(changes.attendanceIndex);
+    if (changes.manualMode !== undefined) setManualMode(changes.manualMode);
 
-    // Broadcast to the live class page/iframe
-    channelRef.current?.postMessage({
-      type: "sync_state",
-      data: changes
-    });
-
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      iframeRef.current.contentWindow.postMessage({
-        type: "sync_state",
-        data: changes
-      }, "*");
+    // Only push to the classroom iframe if manual override mode is enabled
+    if (latestStateRef.current.manualMode || changes.manualMode !== undefined) {
+      if (iframeRef.current && iframeRef.current.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: "sync_state",
+          data: changes
+        }, "*");
+      }
     }
   };
 
@@ -349,12 +365,40 @@ export default function DemoControllerPage() {
 
       {/* RIGHT PANEL: 30% width controller panel */}
       <aside className="w-[30%] h-full bg-zinc-950 border-l border-zinc-800 flex flex-col overflow-y-auto shrink-0">
-        <div className="p-6 border-b border-zinc-800 bg-zinc-900/40 shrink-0">
-          <h1 className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">IP Demo Controller</h1>
-          <p className="text-[11px] text-zinc-400 mt-1">Take control of Accountancy Class presentations manually</p>
+        <div className="p-6 border-b border-zinc-800 bg-zinc-900/40 shrink-0 space-y-4">
+          <div>
+            <h1 className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">IP Demo Controller</h1>
+            <p className="text-[11px] text-zinc-400 mt-1">Take control of Accountancy Class presentations manually</p>
+          </div>
+          
+          {/* Manual Mode Toggle Switch */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+            <span className="text-xs font-bold text-zinc-300">Manual Controller Override</span>
+            <button
+              onClick={() => sync({ manualMode: !manualMode })}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition duration-300 cursor-pointer ${
+                manualMode 
+                  ? "bg-emerald-500 text-black font-extrabold shadow-lg shadow-emerald-500/20" 
+                  : "bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-white"
+              }`}
+            >
+              {manualMode ? "ACTIVE (ON)" : "INACTIVE (OFF)"}
+            </button>
+          </div>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6">
+          {!manualMode ? (
+            <div className="mb-6 p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/25 text-xs text-indigo-300 leading-relaxed">
+              ⚠️ Watch-Only Mode: Mirroring live class updates. Enable the Override Switch above to edit or push presets.
+            </div>
+          ) : (
+            <div className="mb-6 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/25 text-xs text-emerald-300 leading-relaxed animate-pulse">
+              🟢 Override Active: You have manual control. Presets and edits will sync to the classroom.
+            </div>
+          )}
+
+          <div className={manualMode ? "space-y-6" : "space-y-6 opacity-50 pointer-events-none transition duration-300"}>
           {/* Quick Presets */}
           <div className="space-y-2">
             <h3 className="text-xs font-black uppercase tracking-wider text-amber-500">📖 Accountancy Demo Presets</h3>
@@ -571,11 +615,50 @@ export default function DemoControllerPage() {
                   />
                 </div>
 
+                {/* Upload from Computer */}
+                <div className="space-y-1.5 border-t border-zinc-800 pt-2.5">
+                  <label className="text-[9px] text-zinc-500 uppercase font-black">Upload from Computer</label>
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <span>📁</span> Choose Image File
+                    </button>
+                    {uploadedImageUrl && (
+                      <button
+                        onClick={() => { setUploadedImageUrl(null); sync({ activeMedia: null }); }}
+                        className="py-1.5 px-2 bg-zinc-900 hover:bg-red-900/40 border border-zinc-700 text-red-400 rounded-xl text-xs font-bold transition cursor-pointer"
+                        title="Clear uploaded image"
+                      >
+                        ✕
+                      </button>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </div>
+                  {uploadedImageUrl && (
+                    <div className="relative rounded-xl overflow-hidden border border-zinc-700 bg-zinc-900">
+                      <img
+                        src={uploadedImageUrl}
+                        alt="Uploaded preview"
+                        className="w-full h-24 object-cover"
+                      />
+                      <span className="absolute bottom-1 left-1 text-[9px] bg-black/70 text-emerald-400 font-black px-1.5 py-0.5 rounded-lg">✓ LIVE</span>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   onClick={handlePushCustomImage}
                   className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-500/10 cursor-pointer"
                 >
-                  Push Custom Image
+                  Push URL Image
                 </button>
               </div>
             )}
@@ -630,6 +713,7 @@ export default function DemoControllerPage() {
               </div>
             )}
           </div>
+        </div>
         </div>
       </aside>
     </div>

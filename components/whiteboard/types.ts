@@ -7,7 +7,8 @@ export type Tool =
   | "arrow"
   | "highlighter"
   | "laser"
-  | "pan";
+  | "pan"
+  | "text";
 
 export interface Point {
   x: number;
@@ -15,10 +16,14 @@ export interface Point {
 }
 
 export interface Stroke {
+  id: string;
   tool: Tool;
   color: string;
   size: number;
   points: Point[];
+  text?: string;
+  bbox?: { x: number; y: number; width: number; height: number };
+  fontSize?: number;
 }
 
 export interface WhiteboardSettings {

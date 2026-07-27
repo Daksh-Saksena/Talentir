@@ -35,10 +35,69 @@ export function getPointerPosition(
   };
 }
 
+// Ensure Caveat is loaded before we paint — call once on mount
+export async function preloadHandwritingFont(): Promise<void> {
+  if (typeof document === "undefined") return;
+  try {
+    await Promise.all([
+      document.fonts.load("400 40px Caveat"),
+      document.fonts.load("600 40px Caveat"),
+      document.fonts.load("700 40px Caveat"),
+    ]);
+  } catch {
+    // Font failed to load — canvas will fall back gracefully
+  }
+}
+
+/** Apple-Notes style: redraw recognized text using Caveat handwriting font.
+ *  Same color, same bounding box, same visual weight as the original strokes. */
+export function drawFittedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  bbox: { x: number; y: number; width: number; height: number },
+  color: string = "#111827"
+) {
+  if (!text || !bbox || bbox.width <= 0 || bbox.height <= 0) return;
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.textBaseline = "middle";
+
+  // Slightly larger multiplier so Caveat fills the bbox comfortably
+  const fontSize = Math.max(14, Math.round(bbox.height * 0.88));
+  // Use Caveat (handwriting font); fall back to cursive if not loaded yet
+  ctx.font = `600 ${fontSize}px 'Caveat', cursive`;
+
+  const metrics = ctx.measureText(text);
+  const textWidth = metrics.width;
+
+  const centerX = bbox.x + bbox.width / 2;
+  const centerY = bbox.y + bbox.height / 2;
+
+  ctx.translate(centerX, centerY);
+
+  // Scale horizontally so the text fits the bounding box width naturally
+  if (textWidth > 0) {
+    const scaleX = Math.min(1.5, Math.max(0.55, bbox.width / textWidth));
+    ctx.scale(scaleX, 1);
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+
 export function drawStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke
 ) {
+  if (stroke.tool === "text") {
+    if (!stroke.text || !stroke.bbox) return;
+    drawFittedText(ctx, stroke.text, stroke.bbox, stroke.color || "#111827");
+    return;
+  }
+
   if (stroke.points.length === 0) return;
 
   ctx.lineCap = "round";

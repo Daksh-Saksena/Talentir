@@ -8,10 +8,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { createWorker, PSM } from "tesseract.js";
-
+import { createWorker } from "tesseract.js";
 import { Point, Stroke, Tool, MagicSettings } from "./types";
-import { drawStroke, redrawCanvas, getPointerPosition, exportPNG } from "./utils";
+import { COMMON_WORDS, isExactDictionaryWord, isRealWord, normalizeCandidateWord } from "./wordDictionary";
+import { drawStroke, redrawCanvas, getPointerPosition, exportPNG, generateStrokeId, drawFittedText, preloadHandwritingFont } from "./utils";
 
 export interface WhiteboardCanvasHandle {
   undo: () => void;
@@ -33,6 +33,7 @@ interface WhiteboardCanvasProps {
   assistTool?: string;
   setAssistTool?: (tool: string) => void;
   magicSettings?: MagicSettings;
+  onEquationDetected?: (equation: string) => void;
 }
 
 const clampZoom = (value: number) => Math.max(0.5, Math.min(3, value));
@@ -106,6 +107,96 @@ function wrapText(
   ctx.fillText(line, x, y);
 }
 
+function calculateTextFontSize(bboxHeight: number) {
+  return Math.max(18, Math.min(72, Math.round(bboxHeight * 0.96)));
+}
+
+function findDictionaryCorrection(word: string) {
+  const normalized = normalizeCandidateWord(word);
+  if (!normalized) return null;
+  if (isExactDictionaryWord(normalized)) return normalized;
+
+  const variants = new Set<string>();
+  if (normalized.endsWith("s")) {
+    variants.add(normalized.slice(0, -1));
+  }
+  if (normalized.endsWith("es")) {
+    variants.add(normalized.slice(0, -2));
+  }
+  if (normalized.endsWith("ed")) {
+    variants.add(normalized.slice(0, -2));
+  }
+  if (normalized.endsWith("ing")) {
+    variants.add(normalized.slice(0, -3));
+  }
+
+  const substitutions: Record<string, string[]> = {
+    0: ["o"],
+    1: ["i", "l"],
+    2: ["z"],
+    4: ["a"],
+    5: ["s"],
+    6: ["g"],
+    7: ["t"],
+    8: ["b"],
+    l: ["i"],
+    q: ["g"],
+    m: ["n"],
+    u: ["v"],
+  };
+
+  for (let i = 0; i < normalized.length; i += 1) {
+    const replaceChars = substitutions[normalized[i] as keyof typeof substitutions];
+    if (!replaceChars) continue;
+    for (const replacement of replaceChars) {
+      variants.add(normalized.slice(0, i) + replacement + normalized.slice(i + 1));
+    }
+  }
+
+  for (const candidate of variants) {
+    if (candidate && isExactDictionaryWord(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function correctOCRWord(word: string) {
+  const normalized = normalizeCandidateWord(word);
+  if (!normalized) return "";
+  if (isExactDictionaryWord(normalized)) return normalized;
+  const correction = findDictionaryCorrection(normalized);
+  return correction ?? normalized;
+}
+
+function isValidWordCandidate(word: string) {
+  const normalized = normalizeCandidateWord(word);
+  if (!normalized) return false;
+  if (isExactDictionaryWord(normalized)) return true;
+  if (/^\d+$/.test(normalized)) return true;
+
+  if (normalized.length <= 3) {
+    return isExactDictionaryWord(normalized) || Boolean(findDictionaryCorrection(normalized));
+  }
+
+  if (/^[a-z]+$/.test(normalized)) {
+    const vowelCount = (normalized.match(/[aeiouy]/g) || []).length;
+    if (vowelCount < 1) return false;
+    return isRealWord(normalized) || Boolean(findDictionaryCorrection(normalized));
+  }
+
+  return false;
+}
+
+function allWordsAreValid(text: string) {
+  return text
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .every((token) => isValidWordCandidate(token));
+}
+
 // Smooth stroke using Catmull-Rom spline interpolation for better handwriting recognition
 function smoothStroke(points: Point[]): Point[] {
   if (points.length < 4) return points;
@@ -145,6 +236,26 @@ function smoothStroke(points: Point[]): Point[] {
 }
 
 // Draw smooth handwriting strokes for OCR with better quality
+interface OverlaySegment {
+  text: string;
+  beautifiedText: string;
+  bbox: { x: number; y: number; width: number; height: number };
+  fontSize?: number;
+  color?: string;
+}
+
+function expandBBox(
+  bbox: { x: number; y: number; width: number; height: number },
+  padding: number
+) {
+  return {
+    x: Math.max(0, bbox.x - padding),
+    y: Math.max(0, bbox.y - padding),
+    width: bbox.width + padding * 2,
+    height: bbox.height + padding * 2,
+  };
+}
+
 function drawStrokeForOCR(ctx: CanvasRenderingContext2D, stroke: Stroke) {
   if (stroke.points.length === 0) return;
 
@@ -153,7 +264,7 @@ function drawStrokeForOCR(ctx: CanvasRenderingContext2D, stroke: Stroke) {
   ctx.strokeStyle = "#000000";
   ctx.fillStyle = "#000000";
   ctx.globalAlpha = 1;
-  ctx.lineWidth = Math.max(3, stroke.size * 1.5); // Thicker for better OCR
+  ctx.lineWidth = Math.max(3, stroke.size * 1.5);
 
   const first = stroke.points[0];
   const last = stroke.points[stroke.points.length - 1];
@@ -198,7 +309,6 @@ function drawStrokeForOCR(ctx: CanvasRenderingContext2D, stroke: Stroke) {
     ctx.closePath();
     ctx.fill();
   } else {
-    // Pen/freehand - use smooth interpolation for handwriting
     const smoothedPoints = smoothStroke(stroke.points);
     ctx.beginPath();
     ctx.moveTo(smoothedPoints[0].x, smoothedPoints[0].y);
@@ -226,7 +336,7 @@ function findContentBBox(imageData: ImageData): { x: number; y: number; w: numbe
     const b = data[i + 2];
     const gray = (r + g + b) / 3;
     
-    if (gray < 200) { // Dark pixels (content)
+    if (gray < 235) { // Dark pixels or anti-aliased stroke content
       const idx = i / 4;
       const y = Math.floor(idx / width);
       const x = idx % width;
@@ -241,6 +351,74 @@ function findContentBBox(imageData: ImageData): { x: number; y: number; w: numbe
   return hasContent 
     ? { x: Math.max(0, minX - 20), y: Math.max(0, minY - 20), w: maxX - minX + 40, h: maxY - minY + 40 }
     : { x: 0, y: 0, w: width, h: height };
+}
+
+function splitStrokeClusterByWordGap(cluster: Stroke[]) {
+  if (cluster.length <= 1) return [cluster];
+
+  const items = cluster.map((stroke) => ({
+    stroke,
+    bbox: getStrokeBoundingBox([stroke]),
+  }));
+
+  items.sort((a, b) => a.bbox.x - b.bbox.x);
+  const gaps: number[] = [];
+  for (let i = 1; i < items.length; i += 1) {
+    const prev = items[i - 1].bbox;
+    const current = items[i].bbox;
+    const gap = Math.max(0, current.x - (prev.x + prev.width));
+    gaps.push(gap);
+  }
+
+  const clusterBBox = getStrokeBoundingBox(cluster);
+  const medianGap = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 0;
+  const gapThreshold = Math.max(30, Math.min(140, medianGap * 1.6, clusterBBox.height * 1.1));
+
+  const wordClusters: Stroke[][] = [];
+  let currentGroup: Stroke[] = [items[0].stroke];
+
+  for (let i = 1; i < items.length; i += 1) {
+    const prev = items[i - 1].bbox;
+    const current = items[i].bbox;
+    const gap = Math.max(0, current.x - (prev.x + prev.width));
+    if (gap > gapThreshold) {
+      wordClusters.push(currentGroup);
+      currentGroup = [items[i].stroke];
+    } else {
+      currentGroup.push(items[i].stroke);
+    }
+  }
+
+  if (currentGroup.length) {
+    wordClusters.push(currentGroup);
+  }
+
+  return wordClusters.length ? wordClusters : [cluster];
+}
+
+function groupStrokesIntoClusters(strokes: Stroke[]) {
+  const clusters: Stroke[][] = [];
+
+  for (const stroke of strokes) {
+    const strokeBBox = getStrokeBoundingBox([stroke]);
+    let placed = false;
+
+    for (const cluster of clusters) {
+      const clusterBBox = getStrokeBoundingBox(cluster);
+      const intersectionPadding = 18;
+      if (rectanglesIntersect(expandBBox(clusterBBox, intersectionPadding), expandBBox(strokeBBox, intersectionPadding))) {
+        cluster.push(stroke);
+        placed = true;
+        break;
+      }
+    }
+
+    if (!placed) {
+      clusters.push([stroke]);
+    }
+  }
+
+  return clusters;
 }
 
 function getStrokeBoundingBox(strokes: Stroke[]) {
@@ -263,10 +441,10 @@ function getStrokeBoundingBox(strokes: Stroke[]) {
   }
 
   return {
-    x: Math.max(0, minX - 16),
-    y: Math.max(0, minY - 16),
-    width: maxX - minX + 32,
-    height: maxY - minY + 32,
+    x: Math.max(0, minX - 4),
+    y: Math.max(0, minY - 4),
+    width: Math.max(12, maxX - minX + 8),
+    height: Math.max(12, maxY - minY + 8),
   };
 }
 
@@ -282,8 +460,61 @@ function rectanglesIntersect(
   );
 }
 
+type HistoryAction =
+  | { type: "add"; stroke: Stroke }
+  | { type: "remove"; strokes: Stroke[] }
+  | { type: "replace"; removed: Stroke[]; added: Stroke[] };
+
+interface PendingMagicReplacement {
+  removedStrokeIds: string[];
+  overlaySegments: OverlaySegment[];
+}
+
+function distancePointToSegment(point: Point, a: Point, b: Point) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(point.x - a.x, point.y - a.y);
+  }
+
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy)));
+  const projection = { x: a.x + t * dx, y: a.y + t * dy };
+  return Math.hypot(point.x - projection.x, point.y - projection.y);
+}
+
+function pointIntersectsStroke(point: Point, stroke: Stroke, tolerance: number) {
+  if (stroke.tool === "text" && stroke.bbox) {
+    return (
+      point.x >= stroke.bbox.x - tolerance &&
+      point.x <= stroke.bbox.x + stroke.bbox.width + tolerance &&
+      point.y >= stroke.bbox.y - tolerance &&
+      point.y <= stroke.bbox.y + stroke.bbox.height + tolerance
+    );
+  }
+
+  if (stroke.points.length === 0) {
+    return false;
+  }
+
+  for (let i = 0; i < stroke.points.length; i++) {
+    const current = stroke.points[i];
+    if (Math.hypot(point.x - current.x, point.y - current.y) <= tolerance) {
+      return true;
+    }
+
+    if (i + 1 < stroke.points.length) {
+      const next = stroke.points[i + 1];
+      if (distancePointToSegment(point, current, next) <= tolerance) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProps>(function WhiteboardCanvas(
-  { tool, color, penSize, setTool, setColor, setPenSize, assistTool = "none", setAssistTool, magicSettings },
+  { tool, color, penSize, setTool, setColor, setPenSize, assistTool = "none", setAssistTool, magicSettings, onEquationDetected },
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -291,19 +522,20 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
   const redoStack = useRef<Stroke[]>([]);
   const currentStroke = useRef<Stroke | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const drawingRef = useRef(false);
   const [isPanning, setIsPanning] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isProcessing, setIsProcessing] = useState(false);
-  const magicOverlayRef = useRef<{
-    text: string;
-    beautifiedText: string;
-    bbox: { x: number; y: number; width: number; height: number };
-  } | null>(null);
+  const magicOverlayRef = useRef<OverlaySegment[]>([]);
   const workerRef = useRef<any>(null);
   const processingRef = useRef(false);
   const pendingMagicRef = useRef(false);
-  const magicUpdateTimeout = useRef<number | null>(null);
+  const magicIdleTimeout = useRef<number | null>(null);
+  const magicCommitTimeout = useRef<number | null>(null);
+  const pendingMagicReplacementRef = useRef<PendingMagicReplacement | null>(null);
+  const historyRef = useRef<HistoryAction[]>([]);
+  const redoHistoryRef = useRef<HistoryAction[]>([]);
   const offsetRef = useRef(offset);
   const zoomRef = useRef(zoom);
   const panStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
@@ -315,6 +547,15 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
+
+  useEffect(() => {
+    drawingRef.current = drawing;
+  }, [drawing]);
+
+  // Preload Caveat handwriting font so canvas renders it immediately on first OCR
+  useEffect(() => {
+    preloadHandwritingFont();
+  }, []);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -333,15 +574,10 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       drawStroke(ctx, currentStroke.current);
     }
 
-    if (magicOverlayRef.current?.beautifiedText) {
-      const overlay = magicOverlayRef.current;
-      ctx.save();
-      ctx.font = "bold 32px Arial, sans-serif";
-      ctx.fillStyle = "rgba(17, 24, 39, 0.95)";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = "#111827";
-      wrapText(ctx, overlay.beautifiedText, overlay.bbox.x, overlay.bbox.y, overlay.bbox.width, 40);
-      ctx.restore();
+    if (magicOverlayRef.current.length > 0) {
+      for (const overlay of magicOverlayRef.current) {
+        drawFittedText(ctx, overlay.beautifiedText, overlay.bbox, overlay.color || color || "#111827");
+      }
     }
 
     if (assistTool !== "none") {
@@ -409,15 +645,51 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     redraw();
   }, [redraw]);
 
+  const initWorker = useCallback(async () => {
+    if (workerRef.current) return workerRef.current;
+    try {
+      const worker = await createWorker("eng");
+      workerRef.current = worker;
+      return worker;
+    } catch (err) {
+      console.error("[Tesseract Init Error]", err);
+      return null;
+    }
+  }, []);
+
+  async function performVisionOCR(processCanvas: HTMLCanvasElement): Promise<string | null> {
+    try {
+      const dataUrl = processCanvas.toDataURL("image/png");
+      const response = await fetch("/api/vision", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+
+      if (!response.ok) {
+        console.warn(`[Vision OCR] HTTP Error: ${response.status}`);
+        return null;
+      }
+
+      const result = await response.json();
+      if (result && typeof result.text === "string" && result.text.trim()) {
+        return result.text.trim();
+      }
+      return null;
+    } catch (err) {
+      console.warn("[Vision OCR] Exception:", err);
+      return null;
+    }
+  }
+
   useEffect(() => {
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
     return () => {
       window.removeEventListener("resize", resizeCanvas);
-      if (workerRef.current?.terminate) {
-        workerRef.current.terminate();
-      }
     };
   }, [resizeCanvas]);
 
@@ -456,33 +728,66 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     return penStrokes;
   }, []);
 
-  const initWorker = useCallback(async () => {
-    if (workerRef.current) {
-      return workerRef.current;
+  const commitMagicText = useCallback((overlaySegments: OverlaySegment[], removedStrokeIds: string[]) => {
+    const removedStrokes = strokes.current.filter((stroke) => removedStrokeIds.includes(stroke.id));
+    const textStrokes: Stroke[] = overlaySegments.map((segment) => ({
+      id: generateStrokeId(),
+      tool: "text",
+      color: segment.color || "#111827",
+      size: 1,
+      points: [],
+      text: segment.beautifiedText,
+      bbox: segment.bbox,
+      fontSize: segment.fontSize,
+    }));
+
+    strokes.current = strokes.current.filter((stroke) => !removedStrokeIds.includes(stroke.id));
+    strokes.current.push(...textStrokes);
+    historyRef.current.push({ type: "replace", removed: removedStrokes, added: textStrokes });
+    redoHistoryRef.current = [];
+    magicOverlayRef.current = [];
+    pendingMagicReplacementRef.current = null;
+    if (magicCommitTimeout.current) {
+      window.clearTimeout(magicCommitTimeout.current);
+      magicCommitTimeout.current = null;
+    }
+    redraw();
+  }, [redraw]);
+
+  const scheduleMagicCommit = useCallback(() => {
+    if (magicCommitTimeout.current) {
+      window.clearTimeout(magicCommitTimeout.current);
     }
 
-    const worker: any = await createWorker("eng");
-    await worker.load();
-    await worker.loadLanguage("eng");
-    await worker.initialize("eng");
-    await worker.setParameters({
-      tessedit_char_whitelist:
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?:-/()[]{}@#$%&*+=_'\"",
-      preserve_interword_spaces: "1",
-      tesseract_create_hocr: "0",
-      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-    });
+    magicCommitTimeout.current = window.setTimeout(() => {
+      const pending = pendingMagicReplacementRef.current;
+      if (pending && !processingRef.current) {
+        commitMagicText(pending.overlaySegments, pending.removedStrokeIds);
+      }
+    }, 700);
+  }, [commitMagicText]);
 
-    workerRef.current = worker;
-    return workerRef.current;
+  const clearPendingMagicReplacement = useCallback(() => {
+    if (magicCommitTimeout.current) {
+      window.clearTimeout(magicCommitTimeout.current);
+      magicCommitTimeout.current = null;
+    }
+    pendingMagicReplacementRef.current = null;
+    magicOverlayRef.current = [];
   }, []);
 
   const processMagic = useCallback(
     async function processMagicFn() {
       if (!magicSettings?.ocr && !magicSettings?.beautify) {
-        magicOverlayRef.current = null;
+        magicOverlayRef.current = [];
         setIsProcessing(false);
         redraw();
+        return;
+      }
+
+      if (drawingRef.current) {
+        setIsProcessing(false);
+        processingRef.current = false;
         return;
       }
 
@@ -505,17 +810,32 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       
       if (ocrStrokes.length === 0) {
         console.log("[OCR] No strokes found");
-        magicOverlayRef.current = null;
+        // Preserve existing overlay if text was already replaced
+        if (magicOverlayRef.current.length > 0) {
+          setIsProcessing(false);
+          redraw();
+          processingRef.current = false;
+          return;
+        }
+
+        magicOverlayRef.current = [];
         setIsProcessing(false);
         redraw();
         processingRef.current = false;
         return;
       }
 
-      const bbox = getStrokeBoundingBox(ocrStrokes);
-      if (bbox.width === 0 || bbox.height === 0) {
-        console.warn("[OCR] Invalid bounding box");
-        magicOverlayRef.current = null;
+      const clusters = groupStrokesIntoClusters(ocrStrokes);
+      if (clusters.length === 0) {
+        console.log("[OCR] No clusters found");
+        if (magicOverlayRef.current.length > 0) {
+          setIsProcessing(false);
+          redraw();
+          processingRef.current = false;
+          return;
+        }
+
+        magicOverlayRef.current = [];
         setIsProcessing(false);
         redraw();
         processingRef.current = false;
@@ -523,104 +843,128 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       }
 
       try {
-        const worker = await initWorker();
+        const overlaySegments: OverlaySegment[] = [];
+        const recognizedStrokeIds = new Set<string>();
 
-        const renderScale = 5;
-        const strokeCanvas = document.createElement("canvas");
-        strokeCanvas.width = Math.max(100, canvas.width * renderScale);
-        strokeCanvas.height = Math.max(100, canvas.height * renderScale);
-        const strokeCtx = strokeCanvas.getContext("2d");
-        if (!strokeCtx) {
-          console.error("[OCR] Failed to get canvas context");
-          throw new Error("OCR canvas context unavailable");
+        for (const cluster of clusters) {
+          const wordClusters = splitStrokeClusterByWordGap(cluster);
+          for (const subCluster of wordClusters) {
+            const clusterBBox = getStrokeBoundingBox(subCluster);
+            if (clusterBBox.width === 0 || clusterBBox.height === 0) {
+              continue;
+            }
+
+            const beforeOverlayCount = overlaySegments.length;
+            const padding = 20;
+            const renderScale = 2;
+            const strokeCanvas = document.createElement("canvas");
+            strokeCanvas.width = Math.ceil((clusterBBox.width + padding * 2) * renderScale);
+            strokeCanvas.height = Math.ceil((clusterBBox.height + padding * 2) * renderScale);
+            const strokeCtx = strokeCanvas.getContext("2d");
+            if (!strokeCtx) {
+              console.error("[OCR] Failed to get canvas context");
+              continue;
+            }
+
+            strokeCtx.fillStyle = "#ffffff";
+            strokeCtx.fillRect(0, 0, strokeCanvas.width, strokeCanvas.height);
+
+            strokeCtx.save();
+            strokeCtx.scale(renderScale, renderScale);
+            strokeCtx.translate(-clusterBBox.x + padding, -clusterBBox.y + padding);
+            for (const stroke of subCluster) {
+              drawStrokeForOCR(strokeCtx, stroke);
+            }
+            strokeCtx.restore();
+
+            let recognizedText = "";
+
+            // Primary: OpenAI Vision API for extreme handwriting recognition accuracy
+            const visionResult = await performVisionOCR(strokeCanvas);
+            if (visionResult) {
+              recognizedText = visionResult;
+              console.log("[OCR] Vision AI recognized text:", visionResult);
+            } else {
+              // Fallback: Local Tesseract worker
+              const worker = await initWorker();
+              if (worker) {
+                const rawResult = await worker.recognize(strokeCanvas);
+                const ocrData = rawResult?.data ?? rawResult;
+                if (typeof ocrData === "string") {
+                  recognizedText = ocrData.trim();
+                } else if (typeof ocrData?.text === "string") {
+                  recognizedText = ocrData.text.trim();
+                }
+              }
+            }
+
+            const normalizedText = recognizedText.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+            if (!normalizedText) {
+              continue;
+            }
+
+            const cleanedText = magicSettings?.beautify
+              ? formatBeautifiedText(normalizedText)
+              : normalizedText;
+
+            const finalFormatted = cleanedText || normalizedText;
+            if (!finalFormatted) continue;
+
+
+            if (magicSettings?.equationDetection) {
+              const cleanEq = normalizedText.replace(/\s+/g, "").toLowerCase();
+              const isEquation =
+                /[0-9]x|[0-9]y|x[0-9]|[a-z]=|=[0-9a-z]|sin|cos|tan|sqrt|\^2|²|³|\bx\b.*=|\by\b.*=/.test(
+                  cleanEq
+                ) && /=/.test(cleanEq);
+              if (isEquation) {
+                console.log("[Equation Detected — skipping beautify]", normalizedText);
+                onEquationDetected?.(normalizedText);
+                // Skip overlaying text — keep handwriting intact for equations
+                continue;
+              }
+            }
+
+            const strokeColor = subCluster[0]?.color || color || "#111827";
+
+            overlaySegments.push({
+              text: normalizedText,
+              beautifiedText: finalFormatted,
+              fontSize: Math.max(14, Math.round(clusterBBox.height * 0.92)),
+              color: strokeColor,
+              bbox: {
+                x: clusterBBox.x,
+                y: clusterBBox.y,
+                width: clusterBBox.width,
+                height: clusterBBox.height,
+              },
+            });
+
+
+            if (overlaySegments.length > beforeOverlayCount) {
+              for (const stroke of subCluster) {
+                recognizedStrokeIds.add(stroke.id);
+              }
+            }
+          }
         }
 
-        strokeCtx.fillStyle = "#ffffff";
-        strokeCtx.fillRect(0, 0, strokeCanvas.width, strokeCanvas.height);
+        const clustersToRemove = Array.from(recognizedStrokeIds);
 
-        strokeCtx.save();
-        strokeCtx.scale(renderScale, renderScale);
-        for (const stroke of ocrStrokes) {
-          drawStrokeForOCR(strokeCtx, stroke);
-        }
-        strokeCtx.restore();
-
-        const imageData = strokeCtx.getImageData(0, 0, strokeCanvas.width, strokeCanvas.height);
-        const cropRect = findContentBBox(imageData);
-        const processCanvas = document.createElement("canvas");
-        processCanvas.width = cropRect.w;
-        processCanvas.height = cropRect.h;
-        const processCtx = processCanvas.getContext("2d");
-        if (!processCtx) {
-          console.error("[OCR] Failed to get process canvas context");
-          throw new Error("Process canvas context unavailable");
-        }
-
-        processCtx.fillStyle = "#ffffff";
-        processCtx.fillRect(0, 0, processCanvas.width, processCanvas.height);
-        processCtx.drawImage(
-          strokeCanvas,
-          cropRect.x,
-          cropRect.y,
-          cropRect.w,
-          cropRect.h,
-          0,
-          0,
-          cropRect.w,
-          cropRect.h
-        );
-
-        const processedImageData = processCtx.getImageData(0, 0, processCanvas.width, processCanvas.height);
-        const data = processedImageData.data;
-        const threshold = 140;
-        for (let i = 0; i < data.length; i += 4) {
-          const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-          const pixel = gray < threshold ? 0 : 255;
-          data[i] = pixel;
-          data[i + 1] = pixel;
-          data[i + 2] = pixel;
-          data[i + 3] = 255;
-        }
-        processCtx.putImageData(processedImageData, 0, 0);
-
-        console.log("[OCR] Sending to Tesseract", { canvasSize: `${processCanvas.width}x${processCanvas.height}` });
-        const { data: ocrData } = await worker.recognize(processCanvas);
-
-        let normalizedText = ocrData?.text?.trim() || "";
-        console.log("[OCR Result] Raw", { text: normalizedText, length: normalizedText.length });
-
-        normalizedText = normalizedText.replace(/\s+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
-
-        let beautifiedText = normalizedText;
-        if (magicSettings?.beautify) {
-          beautifiedText = formatBeautifiedText(normalizedText);
-        }
-
-        console.log("[OCR Final]", { raw: normalizedText, beautified: beautifiedText });
-
-        if (normalizedText && normalizedText.length > 0) {
-          strokes.current = strokes.current.filter((stroke) => {
-            if (stroke.tool !== "pen") return true;
-            const strokeBBox = getStrokeBoundingBox([stroke]);
-            return !rectanglesIntersect(strokeBBox, bbox);
-          });
-
-          magicOverlayRef.current = {
-            text: normalizedText,
-            beautifiedText: beautifiedText || normalizedText,
-            bbox,
-          };
-          console.log("[OCR Success] Text ready for display");
+        if (overlaySegments.length > 0) {
+          commitMagicText(overlaySegments, clustersToRemove);
+          console.log("[OCR Success] Replaced handwriting with beautified text", { count: overlaySegments.length });
         } else {
-          console.warn("[OCR] No text recognized");
-          magicOverlayRef.current = null;
+          console.warn("[OCR] No text recognized in any cluster");
         }
 
         setIsProcessing(false);
         redraw();
       } catch (error) {
         console.error("[OCR Error]", error);
-        magicOverlayRef.current = null;
+        if (!magicOverlayRef.current.length) {
+          magicOverlayRef.current = [];
+        }
         setIsProcessing(false);
         redraw();
       } finally {
@@ -638,19 +982,35 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     [getOCRStrokes, initWorker, magicSettings?.beautify, magicSettings?.ocr, redraw]
   );
 
-  const scheduleMagicUpdate = useCallback(() => {
-    if (magicUpdateTimeout.current) {
-      window.clearTimeout(magicUpdateTimeout.current);
+  const clearIdleMagicTimeout = useCallback(() => {
+    if (magicIdleTimeout.current) {
+      window.clearTimeout(magicIdleTimeout.current);
+      magicIdleTimeout.current = null;
     }
-    // More aggressive OCR triggering - every 150ms while drawing
-    magicUpdateTimeout.current = window.setTimeout(() => {
-      if (magicSettings?.ocr || magicSettings?.beautify) {
-        console.log("[OCR] Triggering", { ocr: magicSettings?.ocr, beautify: magicSettings?.beautify });
-        processMagic();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearIdleMagicTimeout();
+      if (magicCommitTimeout.current) {
+        window.clearTimeout(magicCommitTimeout.current);
       }
-      magicUpdateTimeout.current = null;
-    }, 150);
-  }, [processMagic, magicSettings?.ocr, magicSettings?.beautify]);
+    };
+  }, [clearIdleMagicTimeout]);
+
+  const scheduleMagicAfterIdle = useCallback(
+    (delay = 3000) => {
+      clearIdleMagicTimeout();
+      magicIdleTimeout.current = window.setTimeout(() => {
+        magicIdleTimeout.current = null;
+        if (magicSettings?.ocr || magicSettings?.beautify) {
+          console.log("[OCR] Idle timeout reached, processing OCR");
+          processMagic();
+        }
+      }, delay);
+    },
+    [clearIdleMagicTimeout, magicSettings?.ocr, magicSettings?.beautify, processMagic]
+  );
 
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button === 2) {
@@ -676,11 +1036,15 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       return;
     }
 
+    clearIdleMagicTimeout();
+    clearPendingMagicReplacement();
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const point = screenToWorld(e.clientX, e.clientY);
     currentStroke.current = {
+      id: generateStrokeId(),
       tool,
       color: tool === "eraser" ? "#ffffff" : color,
       size: tool === "eraser" ? 20 : tool === "highlighter" ? 12 : penSize,
@@ -711,7 +1075,6 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
 
     currentStroke.current.points.push(point);
     redraw();
-    scheduleMagicUpdate();
   };
 
   const stopDrawing = useCallback(() => {
@@ -723,8 +1086,29 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
 
     if (!currentStroke.current) return;
 
-    strokes.current.push(currentStroke.current);
-    redoStack.current = [];
+    const stroke = currentStroke.current;
+    if (stroke.tool === "eraser") {
+      const removed: Stroke[] = [];
+      strokes.current = strokes.current.filter((existing) => {
+        if (existing.id === stroke.id) return false;
+        const erased = stroke.points.some((point) => pointIntersectsStroke(point, existing, 14));
+        if (erased) {
+          removed.push(existing);
+          return false;
+        }
+        return true;
+      });
+
+      if (removed.length > 0) {
+        historyRef.current.push({ type: "remove", strokes: removed });
+        redoHistoryRef.current = [];
+      }
+    } else {
+      strokes.current.push(stroke);
+      historyRef.current.push({ type: "add", stroke });
+      redoHistoryRef.current = [];
+    }
+
     currentStroke.current = null;
     setDrawing(false);
     redraw();
@@ -732,8 +1116,8 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     console.log("[Drawing Stopped] Triggering OCR", { hasSettings: !!magicSettings, ocr: magicSettings?.ocr, beautify: magicSettings?.beautify });
     
     if (magicSettings?.ocr || magicSettings?.beautify) {
-      console.log("[OCR] Starting immediately from stopDrawing");
-      processMagic();
+      console.log("[OCR] Scheduling idle beautify after stopDrawing");
+      scheduleMagicAfterIdle(800);
     } else {
       console.warn("[OCR] Magic settings disabled!");
     }
@@ -744,20 +1128,36 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
   }, [magicSettings?.ocr, magicSettings?.beautify, processMagic]);
 
   const undo = useCallback(() => {
-    if (strokes.current.length === 0) return;
+    const action = historyRef.current.pop();
+    if (!action) return;
 
-    const stroke = strokes.current.pop();
-    if (stroke) redoStack.current.push(stroke);
+    if (action.type === "add") {
+      strokes.current = strokes.current.filter((stroke) => stroke.id !== action.stroke.id);
+    } else if (action.type === "remove") {
+      strokes.current.push(...action.strokes);
+    } else if (action.type === "replace") {
+      strokes.current = strokes.current.filter((stroke) => !action.added.some((added) => added.id === stroke.id));
+      strokes.current.push(...action.removed);
+    }
 
+    redoHistoryRef.current.push(action);
     redraw();
   }, [redraw]);
 
   const redo = useCallback(() => {
-    if (redoStack.current.length === 0) return;
+    const action = redoHistoryRef.current.pop();
+    if (!action) return;
 
-    const stroke = redoStack.current.pop();
-    if (stroke) strokes.current.push(stroke);
+    if (action.type === "add") {
+      strokes.current.push(action.stroke);
+    } else if (action.type === "remove") {
+      strokes.current = strokes.current.filter((stroke) => !action.strokes.some((removed) => removed.id === stroke.id));
+    } else if (action.type === "replace") {
+      strokes.current = strokes.current.filter((stroke) => !action.removed.some((removed) => removed.id === stroke.id));
+      strokes.current.push(...action.added);
+    }
 
+    historyRef.current.push(action);
     redraw();
   }, [redraw]);
 
@@ -765,7 +1165,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     strokes.current = [];
     redoStack.current = [];
     currentStroke.current = null;
-    magicOverlayRef.current = null;
+    magicOverlayRef.current = [];
     setDrawing(false);
     setIsPanning(false);
     redraw();

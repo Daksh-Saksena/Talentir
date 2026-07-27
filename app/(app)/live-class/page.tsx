@@ -6,6 +6,8 @@ import { useAuth } from "@/lib/auth";
 import Toolbar from "@/components/whiteboard/Toolbar";
 import WhiteboardCanvas, { WhiteboardCanvasHandle } from "@/components/whiteboard/WhiteboardCanvas";
 import MagicBar from "@/components/whiteboard/MagicBar";
+import LeftSidebar from "@/components/whiteboard/LeftSidebar";
+import GraphPlotter from "@/components/whiteboard/GraphPlotter";
 import type { MagicSettings, Tool } from "@/components/whiteboard/types";
 import { TextbookView } from "@/app/(app)/textbook/page";
 
@@ -62,6 +64,7 @@ const SIMS: Record<string, string> = {
 
 import { VISUAL_STYLES, CONCEPT_VISUAL_TAXONOMY, CONCEPT_MAPS, ConceptNode } from "./accounting-graph";
 import { lessonRAG } from "./lesson-rag";
+import { searchLocalLibrary, recordShownImage, resetImageHistory } from "./local-image-library";
 
 
 // Accounting formula library — used by the formula card renderer
@@ -150,6 +153,15 @@ export default function LiveClassPage() {
     chemistryDetection: true,
     shapeDetection: true,
   });
+  const [detectedEquations, setDetectedEquations] = useState<string[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleEquationDetected = (eq: string) => {
+    setDetectedEquations((prev) => {
+      if (prev.includes(eq)) return prev;
+      return [eq, ...prev.slice(0, 4)];
+    });
+  };
   const [suggestions, setSuggestions] = useState([
     "Turn this into a neat study summary",
     "Extract the key equations",
@@ -172,6 +184,36 @@ export default function LiveClassPage() {
   const sessionStartRef = useRef<number>(0);
   
   const attendanceIndexRef = useRef(-1);
+
+  // Ref to hold the latest classroom state to prevent stale closures in BroadcastChannel listeners
+  const latestStateRef = useRef({
+    activeMedia,
+    summary,
+    todos,
+    showWhiteboard,
+    showTextbook,
+    topic,
+    isListening,
+    calmMode,
+    showAttendance,
+    attendanceIndex
+  });
+
+  useEffect(() => {
+    latestStateRef.current = {
+      activeMedia,
+      summary,
+      todos,
+      showWhiteboard,
+      showTextbook,
+      topic,
+      isListening,
+      calmMode,
+      showAttendance,
+      attendanceIndex
+    };
+  });
+
   const lastProcessedRef = useRef("");
   const isSpeakingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -239,11 +281,12 @@ export default function LiveClassPage() {
     nativeRecognitionRef.current?.stop();
   };
 
-  // Cross-origin window.postMessage state synchronization for controller preview
+  // Cross-origin window.postMessage state synchronization — receives commands from the controller
   useEffect(() => {
     const handleWindowMessage = (event: MessageEvent) => {
       const { type, data } = event.data || {};
       if (type === "sync_state" && data) {
+        // Apply state to this instance (preview iframe)
         if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
         if (data.summary !== undefined) setSummary(data.summary);
         if (data.todos !== undefined) setTodos(data.todos);
@@ -254,63 +297,139 @@ export default function LiveClassPage() {
         if (data.calmMode !== undefined) setCalmMode(data.calmMode);
         if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
         if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+        // Also forward to the MAIN live-class tab via BroadcastChannel (same origin)
+        // so the actual class display updates when the controller pushes a change
+        try {
+          const fwd = new BroadcastChannel("lc-state-v2");
+          fwd.postMessage({ type: "sync_state", data });
+          fwd.close();
+        } catch (_) {}
       }
     };
     window.addEventListener("message", handleWindowMessage);
     return () => window.removeEventListener("message", handleWindowMessage);
   }, []);
 
-  // FACE RECOGNITION + EXPRESSION + MOUTH DETECTION ENGINE (Disabled for now per user request)
-  useEffect(() => {
-    // Disabled camera and attention tracking
-  }, [isListening]);
 
-  // DEMO MODE STATE SYNC (BroadcastChannel)
+  // 1. PREVIEW IFRAME: Listen for lc_state_broadcast messages from the main tab once on mount and relay them to parent controller
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const channel = new BroadcastChannel("live-class-demo-sync");
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const isPreview = params.get("preview") === "true";
+    if (!isPreview) return;
+
+    const STATE_CHANNEL = "lc-state-v2";
+    const channel = new BroadcastChannel(STATE_CHANNEL);
+    console.log("%c[Preview iframe] Listening on BroadcastChannel lc-state-v2", "color:#06b6d4");
+
+    const handleMessage = (event: MessageEvent) => {
+      const { type, data } = event.data || {};
+      if (type === "lc_state_broadcast" && data) {
+        console.log("%c[Preview iframe] Got lc_state_broadcast, relaying to parent controller", "color:#06b6d4", data.topic);
+        // Apply state locally so the iframe renders correctly
+        if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
+        if (data.summary !== undefined) setSummary(data.summary);
+        if (data.todos !== undefined) setTodos(data.todos);
+        if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
+        if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
+        if (data.topic !== undefined) setTopic(data.topic);
+        if (data.isListening !== undefined) setIsListening(data.isListening);
+        if (data.calmMode !== undefined) setCalmMode(data.calmMode);
+        if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
+        if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+
+        // Relay to parent controller window
+        try {
+          window.parent.postMessage({ type: "classroom_state_update", data }, "*");
+        } catch (_) {}
+      }
+    };
+
+    channel.addEventListener("message", handleMessage);
+    // Request state from the main tab immediately on mount
+    channel.postMessage({ type: "lc_request_state" });
+    console.log("%c[Preview iframe] Sent lc_request_state", "color:#06b6d4");
+
+    return () => {
+      channel.removeEventListener("message", handleMessage);
+      channel.close();
+    };
+  }, []);
+
+  // 2. MAIN LIVE-CLASS TAB: Listen for requests (from iframe) and sync state commands (from controller via iframe) on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const isPreview = params.get("preview") === "true";
+    if (isPreview) return;
+
+    const STATE_CHANNEL = "lc-state-v2";
+    const channel = new BroadcastChannel(STATE_CHANNEL);
+    console.log("%c[Main live-class] BroadcastChannel lc-state-v2 ready", "color:#10b981");
+
+    const handleRequest = (event: MessageEvent) => {
+      if (event.data?.type === "lc_request_state") {
+        console.log("%c[Main live-class] Got lc_request_state — sending current state", "color:#10b981", latestStateRef.current.topic);
+        channel.postMessage({
+          type: "lc_state_broadcast",
+          data: latestStateRef.current
+        });
+      }
       
-      const handleMessage = (event: MessageEvent) => {
-        const { type, data } = event.data;
-        if (type === "sync_state") {
-          if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
-          if (data.summary !== undefined) setSummary(data.summary);
-          if (data.todos !== undefined) setTodos(data.todos);
-          if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
-          if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
-          if (data.topic !== undefined) setTopic(data.topic);
-          if (data.isListening !== undefined) setIsListening(data.isListening);
-          if (data.calmMode !== undefined) setCalmMode(data.calmMode);
-          if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
-          if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
-        } else if (type === "request_state") {
-          channel.postMessage({
-            type: "current_state",
-            data: {
-              activeMedia,
-              summary,
-              todos,
-              showWhiteboard,
-              showTextbook,
-              topic,
-              isListening,
-              calmMode,
-              showAttendance,
-              attendanceIndex
-            }
-          });
-        }
-      };
+      // Also handle sync_state FROM the controller (via iframe) if override mode is active
+      if (event.data?.type === "sync_state" && event.data?.data) {
+        console.log("%c[Main live-class] Received sync_state from controller override", "color:#10b981", event.data.data);
+        const d = event.data.data;
+        if (d.activeMedia !== undefined) setActiveMedia(d.activeMedia);
+        if (d.summary !== undefined) setSummary(d.summary);
+        if (d.todos !== undefined) setTodos(d.todos);
+        if (d.showWhiteboard !== undefined) setShowWhiteboard(d.showWhiteboard);
+        if (d.showTextbook !== undefined) setShowTextbook(d.showTextbook);
+        if (d.topic !== undefined) setTopic(d.topic);
+        if (d.isListening !== undefined) setIsListening(d.isListening);
+        if (d.calmMode !== undefined) setCalmMode(d.calmMode);
+        if (d.showAttendance !== undefined) setShowAttendance(d.showAttendance);
+        if (d.attendanceIndex !== undefined) setAttendanceIndex(d.attendanceIndex);
+      }
+    };
 
-      channel.addEventListener("message", handleMessage);
-      channel.postMessage({ type: "request_state" });
+    channel.addEventListener("message", handleRequest);
+    return () => {
+      channel.removeEventListener("message", handleRequest);
+      channel.close();
+    };
+  }, []);
 
-      return () => {
-        channel.removeEventListener("message", handleMessage);
-        channel.close();
-      };
-    }
+  // 3. MAIN LIVE-CLASS TAB: Broadcast state updates to the preview iframe whenever local state changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const isPreview = params.get("preview") === "true";
+    if (isPreview) return;
+
+    const STATE_CHANNEL = "lc-state-v2";
+    const channel = new BroadcastChannel(STATE_CHANNEL);
+    console.log("%c[Main live-class] Broadcasting state update:", "color:#10b981", topic);
+    
+    channel.postMessage({
+      type: "lc_state_broadcast",
+      data: {
+        activeMedia,
+        summary,
+        todos,
+        showWhiteboard,
+        showTextbook,
+        topic,
+        isListening,
+        calmMode,
+        showAttendance,
+        attendanceIndex
+      }
+    });
+
+    channel.close();
   }, [activeMedia, summary, todos, showWhiteboard, showTextbook, topic, isListening, calmMode, showAttendance, attendanceIndex]);
+
 
   const processTranscript = (cleaned: string) => {
     console.log("%c[Speech Heard]:", "color: #a855f7; font-weight: bold;", cleaned);
@@ -406,6 +525,7 @@ export default function LiveClassPage() {
     if (apiKey) {
       sessionStartRef.current = Date.now();
       studentStatsRef.current = {};
+      resetImageHistory();
       setIsListening(true);
       startDeepgram();
       setLiveTranscript([]);
@@ -456,6 +576,7 @@ export default function LiveClassPage() {
       if (elem.requestFullscreen) elem.requestFullscreen();
       sessionStartRef.current = Date.now();
       studentStatsRef.current = {};
+      resetImageHistory();
       setIsListening(true); startDeepgram();
       setLiveTranscript([]);
       // ── Initialize Lesson RAG in the background ──────────────────────────────
@@ -754,41 +875,56 @@ Use the above textbook excerpts to:
               setIsRefreshing(false);
             }, 600);
           } else if (dec.type === "image") {
-            // Collect all queries: primary + alternatives
+            // ── Priority 1: Search local image library ───────────────────────
             const primaryQuery = dec.primary_visual?.query || "";
-            const altQueries: string[] = (dec.alternatives || []).map((a: { type: string; query: string }) => a.query).filter(Boolean);
-            const allQueries = [primaryQuery, ...altQueries].filter(Boolean).slice(0, 4);
+            const combinedQuery = `${primaryQuery} ${dec.teaching_intent || ""}`.trim();
+            const currentFilename = activeMediaRef.current?.key?.startsWith("/pics/")
+              ? activeMediaRef.current.key.replace("/pics/", "")
+              : null;
 
-            // Fire all searches in parallel
-            const searchResults = await Promise.allSettled(
-              allQueries.map(q => fetchGoogleImages(q, false))
-            );
+            const localResult = searchLocalLibrary(combinedQuery, currentFilename);
 
-            // Pool all successful results
-            const pool: string[] = searchResults
-              .filter((r): r is PromiseFulfilledResult<string | null> => r.status === "fulfilled" && r.value !== null)
-              .map(r => r.value as string)
-              .filter(Boolean);
+            let finalUrl: string;
+            let isLocalImage = false;
 
-            if (pool.length === 0) {
-              console.log("[Visual Plan] All searches returned no results, keeping current visual.");
-              return;
+            if (localResult && localResult.score > 0.04) {
+              console.log("%c[Local Library] Hit! score=", "color:#22c55e", localResult.score.toFixed(3), localResult.image.filename, "query:", combinedQuery);
+              finalUrl = localResult.image.url;
+              isLocalImage = true;
+            } else {
+              // ── Priority 2: Fall back to Google Images ───────────────────
+              console.log("%c[Local Library] No match (score=", "color:#f59e0b", localResult?.score?.toFixed(3) ?? "0", "), falling back to Google.");
+              const altQueries: string[] = (dec.alternatives || []).map((a: { type: string; query: string }) => a.query).filter(Boolean);
+              const allQueries = [primaryQuery, ...altQueries].filter(Boolean).slice(0, 4);
+
+              const searchResults = await Promise.allSettled(
+                allQueries.map(q => fetchGoogleImages(q, false))
+              );
+
+              const pool: string[] = searchResults
+                .filter((r): r is PromiseFulfilledResult<string | null> => r.status === "fulfilled" && r.value !== null)
+                .map(r => r.value as string)
+                .filter(Boolean);
+
+              if (pool.length === 0) {
+                console.log("[Visual Plan] All searches returned no results, keeping current visual.");
+                return;
+              }
+
+              const currentUrl = activeMediaRef.current?.key || "";
+              const freshPool = pool.filter(url => url !== currentUrl);
+              finalUrl = freshPool.length > 0
+                ? freshPool[Math.floor(Math.random() * freshPool.length)]
+                : pool[0];
             }
 
-            // Pick a candidate from the pool (prefer variety — avoid same URL as current)
-            const currentUrl = activeMediaRef.current?.key || "";
-            const freshPool = pool.filter(url => url !== currentUrl);
-            const finalUrl = freshPool.length > 0
-              ? freshPool[Math.floor(Math.random() * freshPool.length)]
-              : pool[0];
-
-            // Preload image before switching
+            // Preload image before switching (local images load instantly, skip timeout penalty)
             const isLoaded = await new Promise<boolean>(resolve => {
               const img = new Image();
               img.src = finalUrl;
               img.onload = () => resolve(true);
               img.onerror = () => resolve(false);
-              setTimeout(() => resolve(false), 5000);
+              setTimeout(() => resolve(false), isLocalImage ? 3000 : 6000);
             });
 
             if (!isLoaded) {
@@ -803,6 +939,11 @@ Use the above textbook excerpts to:
               if (recentStylesRef.current.length > 10) recentStylesRef.current.shift();
               lessonVisualHistoryRef.current.push(chosenStyle);
               if (lessonVisualHistoryRef.current.length > 20) lessonVisualHistoryRef.current.shift();
+            }
+
+            // Record in local library history (for diversity / rotation)
+            if (isLocalImage && localResult) {
+              recordShownImage(localResult.image.filename);
             }
 
             if (!isTrigger && activeMediaRef.current && Date.now() - lastUpdateTimeRef.current < 10000) {
@@ -1006,6 +1147,13 @@ Use the above textbook excerpts to:
                <div className="flex items-center gap-4">
                   <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">Drawing Board</span>
                   <button
+                    onClick={() => setSidebarOpen((v) => !v)}
+                    className="flex items-center gap-1.5 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-95 cursor-pointer"
+                  >
+                    <span>⚙️</span>
+                    <span>Features</span>
+                  </button>
+                  <button
                     onClick={() => setMagicOpen((value) => !value)}
                     className="rounded-full bg-blue-600/20 px-4 py-1 text-xs font-semibold text-blue-200 transition hover:bg-blue-600/30 border border-blue-500/30 cursor-pointer"
                   >
@@ -1057,6 +1205,18 @@ Use the above textbook excerpts to:
 
                {/* Main Canvas */}
                <div className="w-full h-full">
+                  {sidebarOpen && (
+                    <div
+                      className="fixed inset-0 z-40 bg-black/40"
+                      onClick={() => setSidebarOpen(false)}
+                    />
+                  )}
+                  <LeftSidebar
+                    isOpen={sidebarOpen}
+                    onClose={() => setSidebarOpen(false)}
+                    settings={magicSettings}
+                    setSettings={setMagicSettings}
+                  />
                   <WhiteboardCanvas
                     ref={whiteboardRef}
                     tool={tool}
@@ -1068,8 +1228,22 @@ Use the above textbook excerpts to:
                     assistTool={assistTool}
                     setAssistTool={setAssistTool}
                     magicSettings={magicSettings}
+                    onEquationDetected={handleEquationDetected}
                   />
                </div>
+
+               {/* Graph Panels (bottom-right, above canvas) */}
+               {magicSettings.equationDetection && detectedEquations.length > 0 && (
+                 <div className="absolute bottom-6 right-24 z-30 flex flex-col-reverse gap-3 items-end max-h-[85vh] overflow-y-auto">
+                   {detectedEquations.map((eq) => (
+                     <GraphPlotter
+                       key={eq}
+                       equation={eq}
+                       onClose={() => setDetectedEquations((prev) => prev.filter((e) => e !== eq))}
+                     />
+                   ))}
+                 </div>
+               )}
 
                {/* Magic Side Panel */}
                <div
