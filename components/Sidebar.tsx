@@ -12,6 +12,15 @@ const Icon = {
       <rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
     </svg>
   ),
+  aiTutor: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+      <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+      <path d="M4 11a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7z" />
+      <circle cx="9" cy="14" r="1" fill="currentColor" />
+      <circle cx="15" cy="14" r="1" fill="currentColor" />
+      <path d="M10 17h4" />
+    </svg>
+  ),
   simulations: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
       <circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
@@ -76,22 +85,22 @@ const roleMeta = {
   student: {
     accent: "from-indigo-500 to-violet-600",
     label: "Student",
-    tag: "bg-indigo-500/15 text-indigo-300 border-indigo-500/20",
-    active: "bg-indigo-500/15 text-indigo-200",
+    tag: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border-indigo-500/20",
+    active: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-200 font-semibold",
     glow: "shadow-indigo-500/20",
   },
   teacher: {
     accent: "from-purple-500 to-fuchsia-600",
     label: "Teacher",
-    tag: "bg-purple-500/15 text-purple-300 border-purple-500/20",
-    active: "bg-purple-500/15 text-purple-200",
+    tag: "bg-purple-500/15 text-purple-600 dark:text-purple-300 border-purple-500/20",
+    active: "bg-purple-500/15 text-purple-600 dark:text-purple-200 font-semibold",
     glow: "shadow-purple-500/20",
   },
   admin: {
     accent: "from-rose-500 to-orange-500",
     label: "Admin",
-    tag: "bg-rose-500/15 text-rose-300 border-rose-500/20",
-    active: "bg-rose-500/15 text-rose-200",
+    tag: "bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/20",
+    active: "bg-rose-500/15 text-rose-600 dark:text-rose-200 font-semibold",
     glow: "shadow-rose-500/20",
   },
 };
@@ -99,6 +108,7 @@ const roleMeta = {
 // ── Nav link definitions (no emojis) ─────────────
 const studentLinks = [
   { href: "/dashboard",    label: "Dashboard",    icon: Icon.dashboard },
+  { href: "/ai-tutor",     label: "AI Tutor",     icon: Icon.aiTutor },
   { href: "/simulations",  label: "Simulations",  icon: Icon.simulations },
   { href: "/assignments",  label: "Assignments",  icon: Icon.assignments },
   { href: "/tests",        label: "Practice Tests", icon: Icon.tests },
@@ -133,7 +143,7 @@ export default function Sidebar() {
   const meta = roleMeta[user?.role ?? "student"];
 
   return (
-    <aside className="hidden md:flex w-56 flex-col border-r border-slate-800/60 bg-slate-950 relative overflow-hidden">
+    <aside className="hidden md:flex w-56 flex-col border-r border-slate-200 dark:border-slate-800/60 bg-white dark:bg-slate-950 relative overflow-hidden shrink-0">
       {/* Role accent strip at top */}
       <div className={`absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r ${meta.accent}`} />
 
@@ -144,7 +154,7 @@ export default function Sidebar() {
             T
           </div>
           <div>
-            <p className="text-sm font-bold tracking-tight text-white leading-none">Talentir</p>
+            <p className="text-sm font-bold tracking-tight text-slate-900 dark:text-white leading-none">Talentir</p>
             <p className="text-[10px] text-slate-500 tracking-widest uppercase mt-0.5">{meta.label}</p>
           </div>
         </Link>
@@ -159,13 +169,13 @@ export default function Sidebar() {
                 href={link.href}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-150
                   ${active
-                    ? `${meta.active} font-medium`
-                    : "text-slate-500 hover:bg-slate-800/50 hover:text-slate-200"
+                    ? `${meta.active}`
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
                   }`}
               >
-                <span className={`flex-shrink-0 ${active ? "opacity-100" : "opacity-50"}`}>{link.icon}</span>
+                <span className={`flex-shrink-0 ${active ? "opacity-100" : "opacity-60"}`}>{link.icon}</span>
                 <span className="truncate">{link.label}</span>
-                {active && <span className={`ml-auto w-1 h-1 rounded-full bg-gradient-to-b ${meta.accent}`} />}
+                {active && <span className={`ml-auto w-1.5 h-1.5 rounded-full bg-gradient-to-b ${meta.accent}`} />}
               </Link>
             );
           })}
@@ -174,29 +184,29 @@ export default function Sidebar() {
         {/* Admin special actions */}
         {user?.role === "admin" && (
           <div className="mb-3 space-y-1">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-600 px-3 mb-1">Tools</p>
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 px-3 mb-1">Tools</p>
             <Link
               href={process.env.NEXT_PUBLIC_IP_PANEL_URL || "http://localhost:8000/live-class"}
               target="_blank"
-              className="w-full flex items-center justify-between rounded-lg px-3 py-2.5 text-xs text-cyan-400 bg-cyan-500/8 border border-cyan-500/15 hover:bg-cyan-500/15 transition group"
+              className="w-full flex items-center justify-between rounded-lg px-3 py-2.5 text-xs text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/8 border border-cyan-200 dark:border-cyan-500/15 hover:bg-cyan-100 dark:hover:bg-cyan-500/15 transition group"
             >
               <div className="flex items-center gap-2.5">
                 {Icon.panel}
                 <span>IP Panel</span>
               </div>
-              <span className="opacity-40 group-hover:opacity-70 text-[9px] uppercase tracking-widest transition">↗</span>
+              <span className="opacity-60 text-[9px] uppercase tracking-widest transition">↗</span>
             </Link>
           </div>
         )}
 
         {/* User card + logout */}
-        <div className="border-t border-slate-800/60 pt-3">
+        <div className="border-t border-slate-200 dark:border-slate-800/60 pt-3">
           <div className="flex items-center gap-2.5 px-2 mb-3">
             <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${meta.accent} flex items-center justify-center text-xs font-bold text-white shadow-md flex-shrink-0`}>
               {user?.name?.charAt(0)?.toUpperCase() ?? "?"}
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-slate-200 truncate leading-tight">{user?.name}</p>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate leading-tight">{user?.name}</p>
               <span className={`inline-block text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border ${meta.tag} mt-0.5`}>
                 {user?.role}
               </span>
@@ -204,7 +214,7 @@ export default function Sidebar() {
           </div>
           <button
             onClick={logout}
-            className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-slate-500 hover:bg-red-500/8 hover:text-red-400 transition"
+            className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-slate-500 hover:bg-red-50 dark:hover:bg-red-500/8 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition"
           >
             {Icon.logout}
             <span>Sign out</span>

@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
+/* Enable class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #020617;
+  --foreground: #f8fafc;
+}
+
+html.light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
 }
 
 @theme inline {
@@ -12,28 +20,30 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* hello there */ 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* general kenobi */ 
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.3); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.6); }
 
-
-
-
-/* hello there */ 
-/* general kenobi */ /* hello there */ 
-/* general kenobi */ 
+/* Glass card */
+.glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid #e2e8f0;
+}
+html.dark .glass {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+}
 
 /* ── Dashboard Animations ─────────────────────────── */
 @keyframes fade-in {
@@ -68,16 +78,3 @@ body {
 .stagger > *:nth-child(4) { animation-delay: 180ms; }
 .stagger > *:nth-child(5) { animation-delay: 240ms; }
 .stagger > *:nth-child(6) { animation-delay: 300ms; }
-
-/* Thin custom scrollbar */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.3); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,0.6); }
-
-/* Glass card */
-.glass {
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(148, 163, 184, 0.08);
-}
