@@ -186,7 +186,7 @@ export default function Sidebar() {
           <div className="mb-3 space-y-1">
             <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 px-3 mb-1">Tools</p>
             <Link
-              href={process.env.NEXT_PUBLIC_IP_PANEL_URL || "http://localhost:8000/live-class"}
+              href={process.env.NEXT_PUBLIC_IP_PANEL_URL || "/live-class"}
               target="_blank"
               className="w-full flex items-center justify-between rounded-lg px-3 py-2.5 text-xs text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/8 border border-cyan-200 dark:border-cyan-500/15 hover:bg-cyan-100 dark:hover:bg-cyan-500/15 transition group"
             >

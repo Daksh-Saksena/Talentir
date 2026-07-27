@@ -725,7 +725,7 @@ function AdminDashboard() {
               Manage Users
             </Link>
             <Link
-              href={process.env.NEXT_PUBLIC_IP_PANEL_URL || "http://localhost:8000/live-class"}
+              href={process.env.NEXT_PUBLIC_IP_PANEL_URL || "/live-class"}
               target="_blank"
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-cyan-300/30 text-white text-sm font-semibold hover:bg-white/10 transition">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">

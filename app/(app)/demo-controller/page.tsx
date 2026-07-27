@@ -355,7 +355,7 @@ export default function DemoControllerPage() {
             {/* The scaled iframe inside */}
             <iframe 
               ref={iframeRef}
-              src="http://localhost:8000/live-class?preview=true" 
+              src="/live-class?preview=true" 
               onLoad={handleIframeLoad}
               allow="microphone; camera; display-capture;"
               className="absolute border-none bg-black"
