@@ -89,6 +89,7 @@ export default function LiveClassPage() {
   const lastUpdateTimeRef = useRef<number>(0);
   const recentStylesRef = useRef<string[]>([]);          // last 5 visual types this lesson
   const isFetchingVisualRef = useRef(false);
+  const isProcessingSpeechRef = useRef(false);
   // ── Teaching Block Engine ──────────────────────────────────────────────────
   const teachingBlockRef = useRef<{
     name: string;          // e.g. "Depreciation"
@@ -547,8 +548,14 @@ export default function LiveClassPage() {
       return;
     }
 
-    // ── UNSTOPPABLE 10-SECOND HARD LOCK ─────────────────────────────────────
-    // Absolutely prevent ANY visual or block switching if the current visual
+    // ── CONCURRENCY & UNSTOPPABLE 10-SECOND HARD LOCK ───────────────────────
+    // 1. Prevent concurrent speech pipelines (race condition fix)
+    if (isProcessingSpeechRef.current || isFetchingVisualRef.current) {
+      console.log("[Hard Lock] Pipeline already running — buffering transcript only.");
+      return;
+    }
+
+    // 2. Absolutely prevent ANY visual or block switching if the current visual
     // has been displayed for less than 10 seconds (unless manually triggered).
     const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
     if (!isTrigger && activeMediaRef.current && timeSinceLastUpdate < 10000) {
@@ -557,6 +564,7 @@ export default function LiveClassPage() {
       return;
     }
 
+    isProcessingSpeechRef.current = true;
     setThinking("AI Thinking...");
     try {
       // ── STAGE A: Teaching Block Detection ──────────────────────────────────
@@ -776,6 +784,10 @@ Use the above textbook excerpts to:
         isFetchingVisualRef.current = true;
         try {
           if (dec.type === "formula") {
+            if (!isTrigger && activeMediaRef.current && Date.now() - lastUpdateTimeRef.current < 10000) {
+              console.log("[Hard Lock] Aborting formula apply — another visual was applied less than 10s ago.");
+              return;
+            }
             const formulaKey = dec.primary_visual?.query || "";
             activeMediaRef.current = { type: "formula", key: formulaKey };
             lastUpdateTimeRef.current = Date.now();
@@ -836,6 +848,10 @@ Use the above textbook excerpts to:
               if (lessonVisualHistoryRef.current.length > 20) lessonVisualHistoryRef.current.shift();
             }
 
+            if (!isTrigger && activeMediaRef.current && Date.now() - lastUpdateTimeRef.current < 10000) {
+              console.log("[Hard Lock] Aborting image apply — another visual was applied less than 10s ago.");
+              return;
+            }
             activeMediaRef.current = { type: "image", key: finalUrl };
             lastUpdateTimeRef.current = Date.now();
             setIsRefreshing(true);
@@ -855,6 +871,8 @@ Use the above textbook excerpts to:
     } catch (e: any) {
       console.error("AI Error:", e);
       setThinking("Error");
+    } finally {
+      isProcessingSpeechRef.current = false;
     }
   };
 
