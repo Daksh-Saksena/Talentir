@@ -76,7 +76,7 @@ export default function DemoControllerPage() {
   useAuth();
 
   // Controlled states
-  const [topic, setTopic] = useState("Introduction to Accounting");
+  const [topic, setTopic] = useState("Ready to Start");
   const [summary, setSummary] = useState("Listening for lecture points...");
   const [todos, setTodos] = useState<string[]>([]);
   const [activeMedia, setActiveMedia] = useState<{type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null>(null);
@@ -88,19 +88,6 @@ export default function DemoControllerPage() {
   const [attendanceIndex, setAttendanceIndex] = useState(-1);
 
   // Controller UI states
-  // Auto-load the first preset on mount for demo convenience
-  useEffect(() => {
-    if (PRESETS.length > 0) {
-      const first = PRESETS[0];
-      loadPreset(first);
-      // Auto-start listening and session
-      sync({ isListening: true, showAttendance: false, attendanceIndex: -1 });
-      // If the preset does not provide an image, perform a default image search
-      if (first.type === "none" || first.type === "formula") {
-        autoSearchDefaultImage(first.topic);
-      }
-    }
-  }, []);
 
   // Function to automatically search for an image based on a query and push it as active media
   const autoSearchDefaultImage = async (query: string) => {
