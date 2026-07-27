@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev\" \"node scripts/ip-proxy.js\"",
+    "dev": "concurrently \"next dev\" \"node scripts/ip-proxy.js\" \"node scripts/demo-proxy.js\"",
     "dev:standalone": "next dev",
     "build": "next build",
-    "start": "concurrently \"next start\" \"node scripts/ip-proxy.js\"",
+    "start": "concurrently \"next start\" \"node scripts/ip-proxy.js\" \"node scripts/demo-proxy.js\"",
     "start:standalone": "next start",
     "lint": "eslint",
     "sim": "bash ./sim.sh"

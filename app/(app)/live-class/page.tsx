@@ -237,6 +237,53 @@ export default function LiveClassPage() {
     // Disabled camera and attention tracking
   }, [isListening]);
 
+  // DEMO MODE STATE SYNC (BroadcastChannel)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const channel = new BroadcastChannel("live-class-demo-sync");
+      
+      const handleMessage = (event: MessageEvent) => {
+        const { type, data } = event.data;
+        if (type === "sync_state") {
+          if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
+          if (data.summary !== undefined) setSummary(data.summary);
+          if (data.todos !== undefined) setTodos(data.todos);
+          if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
+          if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
+          if (data.topic !== undefined) setTopic(data.topic);
+          if (data.isListening !== undefined) setIsListening(data.isListening);
+          if (data.calmMode !== undefined) setCalmMode(data.calmMode);
+          if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
+          if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+        } else if (type === "request_state") {
+          channel.postMessage({
+            type: "current_state",
+            data: {
+              activeMedia,
+              summary,
+              todos,
+              showWhiteboard,
+              showTextbook,
+              topic,
+              isListening,
+              calmMode,
+              showAttendance,
+              attendanceIndex
+            }
+          });
+        }
+      };
+
+      channel.addEventListener("message", handleMessage);
+      channel.postMessage({ type: "request_state" });
+
+      return () => {
+        channel.removeEventListener("message", handleMessage);
+        channel.close();
+      };
+    }
+  }, [activeMedia, summary, todos, showWhiteboard, showTextbook, topic, isListening, calmMode, showAttendance, attendanceIndex]);
+
   const processTranscript = (cleaned: string) => {
     console.log("%c[Speech Heard]:", "color: #a855f7; font-weight: bold;", cleaned);
     setLiveTranscript(prev => {
