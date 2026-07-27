@@ -88,12 +88,88 @@ export default function DemoControllerPage() {
   const [attendanceIndex, setAttendanceIndex] = useState(-1);
 
   // Controller UI states
+  // Auto-load the first preset on mount for demo convenience
+  useEffect(() => {
+    if (PRESETS.length > 0) {
+      const first = PRESETS[0];
+      loadPreset(first);
+      // Auto-start listening and session
+      sync({ isListening: true, showAttendance: false, attendanceIndex: -1 });
+      // If the preset does not provide an image, perform a default image search
+      if (first.type === "none" || first.type === "formula") {
+        autoSearchDefaultImage(first.topic);
+      }
+    }
+  }, []);
+
+  // Function to automatically search for an image based on a query and push it as active media
+  const autoSearchDefaultImage = async (query: string) => {
+    if (!query) return;
+    try {
+      const res = await fetch(`https://google.serper.dev/images`, {
+        method: "POST",
+        headers: {
+          "X-API-KEY": process.env.NEXT_PUBLIC_SERPER_API_KEY || "",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          q: `${query} accounting illustration`,
+          safe: "active",
+        }),
+      });
+      const data = await res.json();
+      if (data.images && data.images.length > 0) {
+        const url = data.images[0].imageUrl;
+        sync({
+          activeMedia: {
+            type: "image",
+            key: "auto_image_" + Date.now(),
+            caption: `Auto‑search result for ${query}`,
+            url,
+          },
+        });
+      }
+    } catch (e) {
+      console.error("Auto image search failed", e);
+    }
+  };
+
   const [customImageUrl, setCustomImageUrl] = useState("");
+
   const [customImageCaption, setCustomImageCaption] = useState("");
   const [newTodoText, setNewTodoText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
   const channelRef = useRef<BroadcastChannel | null>(null);
+
+  // Ref to hold the latest controller state to prevent stale closure bugs in the BroadcastChannel message handler
+  const latestStateRef = useRef({
+    topic,
+    summary,
+    todos,
+    activeMedia,
+    showWhiteboard,
+    showTextbook,
+    isListening,
+    calmMode,
+    showAttendance,
+    attendanceIndex
+  });
+
+  useEffect(() => {
+    latestStateRef.current = {
+      topic,
+      summary,
+      todos,
+      activeMedia,
+      showWhiteboard,
+      showTextbook,
+      isListening,
+      calmMode,
+      showAttendance,
+      attendanceIndex
+    };
+  });
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -113,6 +189,12 @@ export default function DemoControllerPage() {
           if (data.calmMode !== undefined) setCalmMode(data.calmMode);
           if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
           if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+        } else if (type === "request_state") {
+          // Respond to the newly mounted class view with the current controller state
+          channel.postMessage({
+            type: "sync_state",
+            data: latestStateRef.current
+          });
         }
       };
 
