@@ -10,56 +10,57 @@ import LeftSidebar from "@/components/whiteboard/LeftSidebar";
 import GraphPlotter from "@/components/whiteboard/GraphPlotter";
 import type { MagicSettings, Tool } from "@/components/whiteboard/types";
 import { TextbookView } from "@/app/(app)/textbook/page";
+import Pusher from "pusher-js";
 
 // PhET simulation map — 60+ simulations covering physics, chemistry, biology, math
 const SIMS: Record<string, string> = {
   // Physics — Mechanics
-  'forces':'forces-and-motion-basics','friction':'friction','projectile-motion':'projectile-motion',
-  'gravity':'gravity-force-lab','energy':'energy-skate-park-basics','pendulum':'pendulum-lab',
-  'spring':'masses-and-springs','rotation':'torque','vector':'vector-addition',
-  'motion':'forces-and-motion-basics','collision':'collision-lab','ramp':'the-ramp',
-  'linear-momentum':'collision-lab','free-body-diagram':'forces-and-motion-basics',
-  'centripetal':'gravity-force-lab-basics','fluid':'under-pressure',
-  'pressure':'under-pressure','buoyancy':'under-pressure',
+  'forces': 'forces-and-motion-basics', 'friction': 'friction', 'projectile-motion': 'projectile-motion',
+  'gravity': 'gravity-force-lab', 'energy': 'energy-skate-park-basics', 'pendulum': 'pendulum-lab',
+  'spring': 'masses-and-springs', 'rotation': 'torque', 'vector': 'vector-addition',
+  'motion': 'forces-and-motion-basics', 'collision': 'collision-lab', 'ramp': 'the-ramp',
+  'linear-momentum': 'collision-lab', 'free-body-diagram': 'forces-and-motion-basics',
+  'centripetal': 'gravity-force-lab-basics', 'fluid': 'under-pressure',
+  'pressure': 'under-pressure', 'buoyancy': 'under-pressure',
   // Physics — Waves & Light
-  'waves':'waves-intro','light':'bending-light','refraction':'bending-light',
-  'lens':'geometric-optics','optics':'geometric-optics','sound':'sound-waves',
-  'wave-interference':'wave-interference','diffraction':'wave-interference',
-  'resonance':'resonance','fourier':'fourier-making-waves',
+  'waves': 'waves-intro', 'light': 'bending-light', 'refraction': 'bending-light',
+  'lens': 'geometric-optics', 'optics': 'geometric-optics', 'sound': 'sound-waves',
+  'wave-interference': 'wave-interference', 'diffraction': 'wave-interference',
+  'resonance': 'resonance', 'fourier': 'fourier-making-waves',
   // Physics — Electricity & Magnetism
-  'circuit':'circuit-construction-kit-dc','ohm':'ohms-law','resistor':'ohms-law',
-  'capacitor':'capacitor-lab-basics','coulomb':'coulombs-law','faraday':'faradays-law',
-  'magnetism':'magnets-and-electromagnets','electromagnet':'magnets-and-electromagnets',
-  'electric-field':'charges-and-fields','static':'balloons-and-static-electricity',
-  'induction':'faradays-law','generator':'generator',
+  'circuit': 'circuit-construction-kit-dc', 'ohm': 'ohms-law', 'resistor': 'ohms-law',
+  'capacitor': 'capacitor-lab-basics', 'coulomb': 'coulombs-law', 'faraday': 'faradays-law',
+  'magnetism': 'magnets-and-electromagnets', 'electromagnet': 'magnets-and-electromagnets',
+  'electric-field': 'charges-and-fields', 'static': 'balloons-and-static-electricity',
+  'induction': 'faradays-law', 'generator': 'generator',
   // Physics — Modern & Nuclear
-  'photoelectric':'photoelectric-effect','quantum':'quantum-wave-interference',
-  'nuclear':'nuclear-fission','radioactive':'radioactive-dating-game',
-  'atom':'build-an-atom','isotope':'isotopes-and-atomic-mass',
-  'rutherford':'rutherford-scattering','laser':'lasers',
+  'photoelectric': 'photoelectric-effect', 'quantum': 'quantum-wave-interference',
+  'nuclear': 'nuclear-fission', 'radioactive': 'radioactive-dating-game',
+  'atom': 'build-an-atom', 'isotope': 'isotopes-and-atomic-mass',
+  'rutherford': 'rutherford-scattering', 'laser': 'lasers',
   // Chemistry
-  'molecule':'molecule-shapes','ph':'ph-scale','balancing':'balancing-chemical-equations',
-  'reactant':'reactants-products-and-leftovers','concentration':'concentration',
-  'molarity':'molarity','acid-base':'acid-base-solutions',
-  'gas':'gas-properties','diffusion':'diffusion','states-of-matter':'states-of-matter',
-  'chemical-bond':'molecule-polarity','polarity':'molecule-polarity',
-  'density':'density','dissolution':'sugar-and-salt-solutions',
-  'titration':'acid-base-solutions',
+  'molecule': 'molecule-shapes', 'ph': 'ph-scale', 'balancing': 'balancing-chemical-equations',
+  'reactant': 'reactants-products-and-leftovers', 'concentration': 'concentration',
+  'molarity': 'molarity', 'acid-base': 'acid-base-solutions',
+  'gas': 'gas-properties', 'diffusion': 'diffusion', 'states-of-matter': 'states-of-matter',
+  'chemical-bond': 'molecule-polarity', 'polarity': 'molecule-polarity',
+  'density': 'density', 'dissolution': 'sugar-and-salt-solutions',
+  'titration': 'acid-base-solutions',
   // Biology
-  'natural-selection':'natural-selection','evolution':'natural-selection',
-  'gene':'gene-expression-essentials','dna':'gene-expression-essentials',
-  'membrane':'membrane-channels','neuron':'neuron',
+  'natural-selection': 'natural-selection', 'evolution': 'natural-selection',
+  'gene': 'gene-expression-essentials', 'dna': 'gene-expression-essentials',
+  'membrane': 'membrane-channels', 'neuron': 'neuron',
   // Math
-  'graphing':'graphing-quadratics','trig':'trig-tour','area':'area-model-algebra',
-  'slope':'graphing-slope-intercept','fraction':'fractions-intro',
-  'proportion':'proportion-playground','statistics':'plinko-probability',
-  'probability':'plinko-probability','function':'function-builder',
-  'calculus':'calculus-grapher','derivative':'calculus-grapher',
-  'parabola':'graphing-quadratics','linear-equation':'graphing-slope-intercept',
+  'graphing': 'graphing-quadratics', 'trig': 'trig-tour', 'area': 'area-model-algebra',
+  'slope': 'graphing-slope-intercept', 'fraction': 'fractions-intro',
+  'proportion': 'proportion-playground', 'statistics': 'plinko-probability',
+  'probability': 'plinko-probability', 'function': 'function-builder',
+  'calculus': 'calculus-grapher', 'derivative': 'calculus-grapher',
+  'parabola': 'graphing-quadratics', 'linear-equation': 'graphing-slope-intercept',
   // Earth & Space
-  'greenhouse':'greenhouse-effect','blackbody':'blackbody-spectrum',
-  'solar':'my-solar-system','orbit':'my-solar-system','kepler':'keplers-laws',
-  'gravity-space':'gravity-force-lab-basics','plate-tectonics':'plate-tectonics',
+  'greenhouse': 'greenhouse-effect', 'blackbody': 'blackbody-spectrum',
+  'solar': 'my-solar-system', 'orbit': 'my-solar-system', 'kepler': 'keplers-laws',
+  'gravity-space': 'gravity-force-lab-basics', 'plate-tectonics': 'plate-tectonics',
 };
 
 import { VISUAL_STYLES, CONCEPT_VISUAL_TAXONOMY, CONCEPT_MAPS, ConceptNode } from "./accounting-graph";
@@ -69,17 +70,17 @@ import { searchLocalLibrary, recordShownImage, resetImageHistory } from "./local
 
 // Accounting formula library — used by the formula card renderer
 const ACCOUNTING_FORMULAS: Record<string, { label: string; formula: string; note: string }> = {
-  'accounting equation':  { label: 'Accounting Equation',        formula: 'Assets = Liabilities + Capital',                         note: 'The foundation of double-entry bookkeeping' },
-  'slm depreciation':     { label: 'Straight Line Method (SLM)', formula: 'Depreciation = (Cost \u2212 Scrap Value) \u00f7 Useful Life',      note: 'Equal charge every year on original cost' },
-  'wdv depreciation':     { label: 'Written Down Value (WDV)',    formula: 'Depreciation = Book Value \u00d7 Rate %',                       note: 'Charge declines each year as book value reduces' },
-  'gross profit':         { label: 'Gross Profit',               formula: 'GP = Net Sales \u2212 Cost of Goods Sold',                     note: 'COGS = Opening Stock + Purchases \u2212 Closing Stock' },
-  'net profit':           { label: 'Net Profit',                 formula: 'NP = Gross Profit \u2212 Operating Expenses',                 note: 'Operating expenses: wages, rent, admin costs' },
-  'working capital':      { label: 'Working Capital',            formula: 'WC = Current Assets \u2212 Current Liabilities',              note: 'Measures short-term financial health' },
-  'current ratio':        { label: 'Current Ratio',              formula: 'Current Ratio = Current Assets \u00f7 Current Liabilities',   note: 'Ideal ratio is 2:1' },
-  'cost of goods sold':   { label: 'Cost of Goods Sold (COGS)',  formula: 'COGS = Opening Stock + Net Purchases \u2212 Closing Stock',  note: 'Used in the Trading Account' },
-  'rate of depreciation': { label: 'Rate of Depreciation',       formula: 'Rate = (Annual Depreciation \u00f7 Original Cost) \u00d7 100',    note: 'Expressed as a percentage per annum' },
-  'trade discount':       { label: 'Trade Discount',             formula: 'Net Price = List Price \u2212 Trade Discount',                note: 'Not recorded in books; deducted before journalising' },
-  'capital':              { label: 'Capital Formula',            formula: 'Capital = Assets \u2212 Liabilities',                        note: "Owner's equity or proprietor's fund" },
+  'accounting equation': { label: 'Accounting Equation', formula: 'Assets = Liabilities + Capital', note: 'The foundation of double-entry bookkeeping' },
+  'slm depreciation': { label: 'Straight Line Method (SLM)', formula: 'Depreciation = (Cost \u2212 Scrap Value) \u00f7 Useful Life', note: 'Equal charge every year on original cost' },
+  'wdv depreciation': { label: 'Written Down Value (WDV)', formula: 'Depreciation = Book Value \u00d7 Rate %', note: 'Charge declines each year as book value reduces' },
+  'gross profit': { label: 'Gross Profit', formula: 'GP = Net Sales \u2212 Cost of Goods Sold', note: 'COGS = Opening Stock + Purchases \u2212 Closing Stock' },
+  'net profit': { label: 'Net Profit', formula: 'NP = Gross Profit \u2212 Operating Expenses', note: 'Operating expenses: wages, rent, admin costs' },
+  'working capital': { label: 'Working Capital', formula: 'WC = Current Assets \u2212 Current Liabilities', note: 'Measures short-term financial health' },
+  'current ratio': { label: 'Current Ratio', formula: 'Current Ratio = Current Assets \u00f7 Current Liabilities', note: 'Ideal ratio is 2:1' },
+  'cost of goods sold': { label: 'Cost of Goods Sold (COGS)', formula: 'COGS = Opening Stock + Net Purchases \u2212 Closing Stock', note: 'Used in the Trading Account' },
+  'rate of depreciation': { label: 'Rate of Depreciation', formula: 'Rate = (Annual Depreciation \u00f7 Original Cost) \u00d7 100', note: 'Expressed as a percentage per annum' },
+  'trade discount': { label: 'Trade Discount', formula: 'Net Price = List Price \u2212 Trade Discount', note: 'Not recorded in books; deducted before journalising' },
+  'capital': { label: 'Capital Formula', formula: 'Capital = Assets \u2212 Liabilities', note: "Owner's equity or proprietor's fund" },
 };
 
 interface Student {
@@ -91,9 +92,9 @@ export default function LiveClassPage() {
   const [apiKey] = useState(process.env.NEXT_PUBLIC_OPENAI_API_KEY || "");
   const [deepgramKey] = useState(process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY || "");
   const serperKey = process.env.NEXT_PUBLIC_SERPER_API_KEY || "";
-  
-  const [activeMedia, _setActiveMedia] = useState<{type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null>(null);
-  const activeMediaRef = useRef<{type: string, key: string} | null>(null);
+
+  const [activeMedia, _setActiveMedia] = useState<{ type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string } | null>(null);
+  const activeMediaRef = useRef<{ type: string, key: string } | null>(null);
   const lastUpdateTimeRef = useRef<number>(0);
   const recentStylesRef = useRef<string[]>([]);          // last 5 visual types this lesson
   const isFetchingVisualRef = useRef(false);
@@ -107,7 +108,7 @@ export default function LiveClassPage() {
   } | null>(null);
   const lessonVisualHistoryRef = useRef<string[]>([]);  // last 15 visual types this lesson
 
-  const setActiveMedia = (media: {type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string} | null) => {
+  const setActiveMedia = (media: { type: "sim" | "image" | "video" | "formula", key: string, caption: string, url?: string } | null) => {
     _setActiveMedia(media);
     activeMediaRef.current = media ? { type: media.type, key: media.key } : null;
     if (media) {
@@ -121,7 +122,7 @@ export default function LiveClassPage() {
   const [showAttendance, setShowAttendance] = useState(false);
   const [attendanceIndex, setAttendanceIndex] = useState(-1);
   const [mood, setMood] = useState("default");
-  
+
   // NEW DASHBOARD STATES
   const [topic, setTopic] = useState("Ready to Start");
   const [summary, setSummary] = useState("Listening for lecture points...");
@@ -133,11 +134,10 @@ export default function LiveClassPage() {
   const [blockStage, setBlockStage] = useState<{ name: string; stage: number; total: number } | null>(null);
   // ── Lesson RAG status ─────────────────────────────────────────────────────
   const [ragStatus, setRagStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  
   // QUIZ, Q&A, ADHD
-  const [quiz, setQuiz] = useState<{q: string, options: string[], answer: number} | null>(null);
+  const [quiz, setQuiz] = useState<{ q: string, options: string[], answer: number } | null>(null);
   const [calmMode, setCalmMode] = useState(false);
-  
+
   // WHITEBOARD & TEXTBOOK STATE
   const [showWhiteboard, setShowWhiteboard] = useState(false);
   const [showTextbook, setShowTextbook] = useState(false);
@@ -170,7 +170,7 @@ export default function LiveClassPage() {
   ]);
   const [assistTool, setAssistTool] = useState("none");
   const [magicOpen, setMagicOpen] = useState(false);
-  
+
   // ATTENTION & PARTICIPATION
   const [attention, setAttention] = useState(0);
   const [facesDetected, setFacesDetected] = useState(0);
@@ -182,7 +182,7 @@ export default function LiveClassPage() {
   const faceIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const studentStatsRef = useRef<Record<string, { attentionSum: number, attentionCount: number, speakingCount: number, confusionSum: number, boredomSum: number, firstSeen: number, lastSeen: number }>>({});
   const sessionStartRef = useRef<number>(0);
-  
+
   const attendanceIndexRef = useRef(-1);
 
   // Ref to hold the latest classroom state to prevent stale closures in BroadcastChannel listeners
@@ -219,7 +219,7 @@ export default function LiveClassPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const nativeRecognitionRef = useRef<any>(null);
-  
+
   const [students, setStudents] = useState<Student[]>([
     { name: "Aarav", status: "pending" }, { name: "Aditi", status: "pending" },
     { name: "Vihaan", status: "pending" }, { name: "Diya", status: "pending" },
@@ -227,7 +227,7 @@ export default function LiveClassPage() {
     { name: "Arjun", status: "pending" }, { name: "Zoya", status: "pending" },
     { name: "Ishaan", status: "pending" }, { name: "Kavya", status: "pending" }
   ]);
-  
+
   const transcriptBuffer = useRef<string[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -245,7 +245,7 @@ export default function LiveClassPage() {
         nativeRecognitionRef.current.onresult = (e: any) => {
           let t = "";
           for (let i = e.resultIndex; i < e.results.length; ++i) t += e.results[i][0].transcript;
-          if (e.results[e.results.length-1].isFinal) processTranscript(t.toLowerCase());
+          if (e.results[e.results.length - 1].isFinal) processTranscript(t.toLowerCase());
         };
         nativeRecognitionRef.current.onend = () => { if (isListening && !socketRef.current) nativeRecognitionRef.current.start(); };
       }
@@ -271,7 +271,7 @@ export default function LiveClassPage() {
       };
       socket.onerror = () => { nativeRecognitionRef.current?.start(); };
       mediaRecorderRef.current.ondataavailable = (event) => { if (event.data.size > 0 && socket.readyState === 1) socket.send(event.data); };
-    } catch(e) { nativeRecognitionRef.current?.start(); }
+    } catch (e) { nativeRecognitionRef.current?.start(); }
   };
 
   const stopEngines = () => {
@@ -303,7 +303,7 @@ export default function LiveClassPage() {
           const fwd = new BroadcastChannel("lc-state-v2");
           fwd.postMessage({ type: "sync_state", data });
           fwd.close();
-        } catch (_) {}
+        } catch (_) { }
       }
     };
     window.addEventListener("message", handleWindowMessage);
@@ -341,7 +341,7 @@ export default function LiveClassPage() {
         // Relay to parent controller window
         try {
           window.parent.postMessage({ type: "classroom_state_update", data }, "*");
-        } catch (_) {}
+        } catch (_) { }
       }
     };
 
@@ -375,7 +375,7 @@ export default function LiveClassPage() {
           data: latestStateRef.current
         });
       }
-      
+
       // Also handle sync_state FROM the controller (via iframe) if override mode is active
       if (event.data?.type === "sync_state" && event.data?.data) {
         console.log("%c[Main live-class] Received sync_state from controller override", "color:#10b981", event.data.data);
@@ -410,7 +410,7 @@ export default function LiveClassPage() {
     const STATE_CHANNEL = "lc-state-v2";
     const channel = new BroadcastChannel(STATE_CHANNEL);
     console.log("%c[Main live-class] Broadcasting state update:", "color:#10b981", topic);
-    
+
     channel.postMessage({
       type: "lc_state_broadcast",
       data: {
@@ -491,13 +491,13 @@ export default function LiveClassPage() {
   useEffect(() => {
     attendanceIndexRef.current = attendanceIndex;
     if (attendanceIndex >= 0 && attendanceIndex < students.length) {
-       setShowAttendance(true);
-       speak(students[attendanceIndex].name);
+      setShowAttendance(true);
+      speak(students[attendanceIndex].name);
     } else if (attendanceIndex >= students.length && attendanceIndex !== -1) {
-       speak("Attendance complete");
-       setAttendanceIndex(-1);
-       attendanceIndexRef.current = -1;
-       setTimeout(() => setShowAttendance(false), 4000);
+      speak("Attendance complete");
+      setAttendanceIndex(-1);
+      attendanceIndexRef.current = -1;
+      setTimeout(() => setShowAttendance(false), 4000);
     }
   }, [attendanceIndex, students.length]);
 
@@ -541,7 +541,7 @@ export default function LiveClassPage() {
       // Auto-save class summary on stop
       if (topic !== "Ready to Start") {
         const saved = JSON.parse(localStorage.getItem('cc-summaries') || '[]');
-        saved.unshift({ id: `cs_${Date.now()}`, date: new Date().toISOString().split('T')[0], subject: 'General', title: topic, summary, teacher: 'Teacher', topics: todos.slice(0,3) });
+        saved.unshift({ id: `cs_${Date.now()}`, date: new Date().toISOString().split('T')[0], subject: 'General', title: topic, summary, teacher: 'Teacher', topics: todos.slice(0, 3) });
         localStorage.setItem('cc-summaries', JSON.stringify(saved));
       }
       // Save per-student session analytics
@@ -598,7 +598,7 @@ export default function LiveClassPage() {
       const q = JSON.parse(d.choices[0].message.content);
       setQuiz(q);
       speak(q.q);
-    } catch(e) {}
+    } catch (e) { }
   };
 
   const manualSync = () => handleHeardSpeech("MANUAL_SYNC_TRIGGER");
@@ -608,7 +608,7 @@ export default function LiveClassPage() {
     if (!isTrigger) {
       transcriptBuffer.current.push(text);
       if (transcriptBuffer.current.length > 8) transcriptBuffer.current.shift();
-      setCountdown(30); 
+      setCountdown(30);
     }
 
     const context = transcriptBuffer.current.join(" ");
@@ -629,7 +629,7 @@ export default function LiveClassPage() {
     // has been displayed for less than 10 seconds (unless manually triggered).
     const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
     if (!isTrigger && activeMediaRef.current && timeSinceLastUpdate < 10000) {
-      console.log(`%c[Hard Lock] Visual locked for 10s minimum. (${Math.round(timeSinceLastUpdate/1000)}s / 10s elapsed)`, 'color: #f59e0b; font-weight: bold;');
+      console.log(`%c[Hard Lock] Visual locked for 10s minimum. (${Math.round(timeSinceLastUpdate / 1000)}s / 10s elapsed)`, 'color: #f59e0b; font-weight: bold;');
       setThinking("Active");
       return;
     }
@@ -1009,11 +1009,11 @@ Use the above textbook excerpts to:
   // Fallback: Wikipedia thumbnail (free, no key needed)
   const fetchWikiMedia = async (query: string) => {
     try {
-       const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=1&prop=pageimages&pithumbsize=1200`);
-       const data = await res.json();
-       if (!data.query?.pages) return null;
-       const pages = data.query.pages;
-       return pages[Object.keys(pages)[0]].thumbnail?.source || null;
+      const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=1&prop=pageimages&pithumbsize=1200`);
+      const data = await res.json();
+      if (!data.query?.pages) return null;
+      const pages = data.query.pages;
+      return pages[Object.keys(pages)[0]].thumbnail?.source || null;
     } catch (e) { return null; }
   };
 
@@ -1023,7 +1023,7 @@ Use the above textbook excerpts to:
 
   return (
     <div ref={containerRef} className="fixed inset-0 bg-black flex flex-col font-sans overflow-hidden text-white select-none">
-      
+
       <style jsx>{`
         @keyframes twinkle { 0%, 100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.2); } }
         .star-field {
@@ -1039,100 +1039,99 @@ Use the above textbook excerpts to:
 
       {/* CLEAN DARK BACKGROUND */}
       <div className="absolute inset-0 z-0 pointer-events-none bg-[#0a0a0c]">
-         <div className="absolute inset-0 opacity-[0.03] pointer-events-none noise-layer" />
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none noise-layer" />
       </div>
 
       {/* ADHD CALMING OVERLAY */}
       {calmMode && (
-         <div className="absolute inset-0 z-[5] pointer-events-none flex items-center justify-center bg-black/20 animate-fade-in">
-            <div className="w-[500px] h-[500px] rounded-full bg-indigo-500/40 shadow-[0_0_100px_rgba(99,102,241,0.2)]" style={{ animation: 'calm-breathe 8s infinite ease-in-out' }} />
-            <div className="absolute w-[300px] h-[300px] rounded-full bg-cyan-400/30 shadow-[0_0_80px_rgba(34,211,238,0.2)]" style={{ animation: 'calm-breathe 6s infinite ease-in-out 1s' }} />
-            <div className="absolute flex flex-col items-center gap-4">
-               <p className="text-[12px] uppercase tracking-[1em] text-white/40 font-black animate-pulse">Deep Breath</p>
-               <div className="w-1 h-12 bg-gradient-to-b from-white/0 via-white/20 to-white/0" />
-            </div>
-         </div>
+        <div className="absolute inset-0 z-[5] pointer-events-none flex items-center justify-center bg-black/20 animate-fade-in">
+          <div className="w-[500px] h-[500px] rounded-full bg-indigo-500/40 shadow-[0_0_100px_rgba(99,102,241,0.2)]" style={{ animation: 'calm-breathe 8s infinite ease-in-out' }} />
+          <div className="absolute w-[300px] h-[300px] rounded-full bg-cyan-400/30 shadow-[0_0_80px_rgba(34,211,238,0.2)]" style={{ animation: 'calm-breathe 6s infinite ease-in-out 1s' }} />
+          <div className="absolute flex flex-col items-center gap-4">
+            <p className="text-[12px] uppercase tracking-[1em] text-white/40 font-black animate-pulse">Deep Breath</p>
+            <div className="w-1 h-12 bg-gradient-to-b from-white/0 via-white/20 to-white/0" />
+          </div>
+        </div>
       )}
 
       {/* RIGHT SUMMARY + TODO PANEL */}
       {!showTextbook && (
-         <div className={`absolute right-6 ${showWhiteboard ? "top-20 -translate-y-0 z-50 scale-95 origin-top-right" : "top-20 -translate-y-0 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
-            {/* Summary */}
-            <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
-               <div className="flex items-center gap-3">
-                  <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
-                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">Summary</span>
-               </div>
-               <p className="text-xs leading-relaxed text-white/90 font-medium tracking-wide">{summary}</p>
+        <div className={`absolute right-6 ${showWhiteboard ? "top-20 -translate-y-0 z-50 scale-95 origin-top-right" : "top-20 -translate-y-0 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
+          {/* Summary */}
+          <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
+            <div className="flex items-center gap-3">
+              <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
+              <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">Summary</span>
             </div>
+            <p className="text-xs leading-relaxed text-white/90 font-medium tracking-wide">{summary}</p>
+          </div>
 
-            {/* ToDo List (below Summary on the right) */}
-            {!showWhiteboard && (
-               <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-up flex flex-col gap-4 pointer-events-auto">
-                  <div className="flex items-center justify-between">
-                     <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">ToDo List</span>
-                     <span className="text-[8px] font-mono text-white/30">{todos.length} Active</span>
+          {/* ToDo List (below Summary on the right) */}
+          {!showWhiteboard && (
+            <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-up flex flex-col gap-4 pointer-events-auto">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">ToDo List</span>
+                <span className="text-[8px] font-mono text-white/30">{todos.length} Active</span>
+              </div>
+              <div className="flex flex-col gap-2.5 max-h-40 overflow-y-auto scrollbar-thin">
+                {todos.length > 0 ? todos.slice(-4).map((todo, i) => (
+                  <div key={i} className="flex gap-3 items-start animate-fade-in">
+                    <div className="w-1.5 h-1.5 rounded-full border border-indigo-500/50 mt-1.5 shrink-0" />
+                    <p className="text-xs text-white/80 font-medium leading-relaxed">{todo}</p>
                   </div>
-                  <div className="flex flex-col gap-2.5 max-h-40 overflow-y-auto scrollbar-thin">
-                     {todos.length > 0 ? todos.slice(-4).map((todo, i) => (
-                        <div key={i} className="flex gap-3 items-start animate-fade-in">
-                           <div className="w-1.5 h-1.5 rounded-full border border-indigo-500/50 mt-1.5 shrink-0" />
-                           <p className="text-xs text-white/80 font-medium leading-relaxed">{todo}</p>
-                        </div>
-                     )) : (
-                        <p className="text-[10px] text-white/20 italic">No tasks mentioned yet...</p>
-                     )}
-                  </div>
-               </div>
-            )}
-         </div>
+                )) : (
+                  <p className="text-[10px] text-white/20 italic">No tasks mentioned yet...</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Attendance Overlay */}
       <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
-         <div className="bg-white/5 backdrop-blur-3xl border-b border-white/10 w-full p-10 flex flex-col items-center justify-center gap-10">
-            <div className="flex flex-wrap gap-4 justify-center max-w-5xl">
-                {students.map((s, i) => (
-                  <div key={i} className={`px-5 py-2.5 rounded-2xl border transition-all duration-500 flex items-center gap-3 ${
-                    i === attendanceIndex ? 'bg-white text-black scale-110 shadow-[0_0_40px_rgba(255,255,255,0.4)] z-10' :
-                    s.status === 'present' ? 'bg-green-500/20 border-green-500/30 text-green-400' : 
-                    s.status === 'absent' ? 'bg-red-500/20 border-red-500/30 text-red-400' :
+        <div className="bg-white/5 backdrop-blur-3xl border-b border-white/10 w-full p-10 flex flex-col items-center justify-center gap-10">
+          <div className="flex flex-wrap gap-4 justify-center max-w-5xl">
+            {students.map((s, i) => (
+              <div key={i} className={`px-5 py-2.5 rounded-2xl border transition-all duration-500 flex items-center gap-3 ${i === attendanceIndex ? 'bg-white text-black scale-110 shadow-[0_0_40px_rgba(255,255,255,0.4)] z-10' :
+                s.status === 'present' ? 'bg-green-500/20 border-green-500/30 text-green-400' :
+                  s.status === 'absent' ? 'bg-red-500/20 border-red-500/30 text-red-400' :
                     'bg-white/5 border-white/5 text-white/10'
-                  }`}>
-                     <span className="text-[10px] font-black tracking-widest uppercase">{s.name}</span>
-                  </div>
-                ))}
+                }`}>
+                <span className="text-[10px] font-black tracking-widest uppercase">{s.name}</span>
+              </div>
+            ))}
+          </div>
+          {attendanceIndex >= 0 && attendanceIndex < students.length && (
+            <div className="flex flex-col items-center gap-2 animate-fade-up">
+              <p className="text-[10px] uppercase tracking-[0.6em] text-white/20 font-black">Awaiting Response</p>
+              <h3 className="text-4xl font-black tracking-[0.2em] text-white uppercase">
+                {students[attendanceIndex].name}
+              </h3>
             </div>
-            {attendanceIndex >= 0 && attendanceIndex < students.length && (
-               <div className="flex flex-col items-center gap-2 animate-fade-up">
-                  <p className="text-[10px] uppercase tracking-[0.6em] text-white/20 font-black">Awaiting Response</p>
-                  <h3 className="text-4xl font-black tracking-[0.2em] text-white uppercase">
-                     {students[attendanceIndex].name}
-                  </h3>
-               </div>
-            )}
-         </div>
+          )}
+        </div>
       </div>
 
       {/* QUIZ OVERLAY */}
       {quiz && (
-         <div className="absolute inset-x-0 bottom-20 z-50 flex justify-center animate-fade-up">
-            <div className="w-[600px] p-8 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-[40px] shadow-2xl">
-               <div className="flex items-center justify-between mb-6">
-                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-indigo-400">Live Quiz</span>
-                  <button onClick={() => setQuiz(null)} className="text-white/30 hover:text-white text-xs">✕</button>
-               </div>
-               <p className="text-sm font-bold text-white mb-6 leading-relaxed">{quiz.q}</p>
-               <div className="grid grid-cols-2 gap-3">
-                  {quiz.options.map((opt, i) => (
-                     <button key={i} onClick={() => { speak(i === quiz.answer ? 'Correct!' : 'Incorrect. The answer is ' + quiz.options[quiz.answer]); setTimeout(() => setQuiz(null), 3000); }}
-                        className="px-4 py-3 rounded-2xl border border-white/10 bg-white/5 text-xs text-white/80 hover:bg-indigo-500/20 hover:border-indigo-500/30 transition text-left">
-                        <span className="text-indigo-400 font-bold mr-2">{String.fromCharCode(65+i)}</span>{opt}
-                     </button>
-                  ))}
-               </div>
+        <div className="absolute inset-x-0 bottom-20 z-50 flex justify-center animate-fade-up">
+          <div className="w-[600px] p-8 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-[40px] shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <span className="text-[10px] uppercase tracking-[0.4em] font-black text-indigo-400">Live Quiz</span>
+              <button onClick={() => setQuiz(null)} className="text-white/30 hover:text-white text-xs">✕</button>
             </div>
-         </div>
+            <p className="text-sm font-bold text-white mb-6 leading-relaxed">{quiz.q}</p>
+            <div className="grid grid-cols-2 gap-3">
+              {quiz.options.map((opt, i) => (
+                <button key={i} onClick={() => { speak(i === quiz.answer ? 'Correct!' : 'Incorrect. The answer is ' + quiz.options[quiz.answer]); setTimeout(() => setQuiz(null), 3000); }}
+                  className="px-4 py-3 rounded-2xl border border-white/10 bg-white/5 text-xs text-white/80 hover:bg-indigo-500/20 hover:border-indigo-500/30 transition text-left">
+                  <span className="text-indigo-400 font-bold mr-2">{String.fromCharCode(65 + i)}</span>{opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
 
@@ -1141,252 +1140,252 @@ Use the above textbook excerpts to:
 
       {/* IN-PLACE DRAWING BOARD OVERLAY */}
       {showWhiteboard && (
-         <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#171717] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
-            {/* Top Bar */}
-            <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30 pl-[340px]">
-               <div className="flex items-center gap-4">
-                  <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">Drawing Board</span>
-                  <button
-                    onClick={() => setSidebarOpen((v) => !v)}
-                    className="flex items-center gap-1.5 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-95 cursor-pointer"
-                  >
-                    <span>⚙️</span>
-                    <span>Features</span>
-                  </button>
-                  <button
-                    onClick={() => setMagicOpen((value) => !value)}
-                    className="rounded-full bg-blue-600/20 px-4 py-1 text-xs font-semibold text-blue-200 transition hover:bg-blue-600/30 border border-blue-500/30 cursor-pointer"
-                  >
-                    ✨ Magic AI
-                  </button>
-                  <span className="text-xs text-zinc-400 font-medium hidden md:inline">Draw diagrams, write equations, or summarize concepts</span>
-               </div>
-               <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2 rounded-full bg-zinc-900/90 px-4 py-1.5 text-xs text-zinc-200 border border-white/10">
-                     <span className="font-bold uppercase tracking-wider text-indigo-400">
-                        {tool === "eraser" ? "Eraser" : tool === "highlighter" ? "Highlighter" : tool === "pan" ? "Pan" : tool === "laser" ? "Laser" : "Pen"}
-                     </span>
-                     <span className="text-zinc-600">•</span>
-                     <div className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: color }} />
-                     <span className="text-zinc-600">•</span>
-                     <span>{penSize}px</span>
-                  </div>
-                  <button
-                    onClick={() => setShowWhiteboard(false)}
-                    className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
-                  >
-                    ✕ Close Board
-                  </button>
-               </div>
+        <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#171717] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
+          {/* Top Bar */}
+          <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30 pl-[340px]">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">Drawing Board</span>
+              <button
+                onClick={() => setSidebarOpen((v) => !v)}
+                className="flex items-center gap-1.5 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-95 cursor-pointer"
+              >
+                <span>⚙️</span>
+                <span>Features</span>
+              </button>
+              <button
+                onClick={() => setMagicOpen((value) => !value)}
+                className="rounded-full bg-blue-600/20 px-4 py-1 text-xs font-semibold text-blue-200 transition hover:bg-blue-600/30 border border-blue-500/30 cursor-pointer"
+              >
+                ✨ Magic AI
+              </button>
+              <span className="text-xs text-zinc-400 font-medium hidden md:inline">Draw diagrams, write equations, or summarize concepts</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 rounded-full bg-zinc-900/90 px-4 py-1.5 text-xs text-zinc-200 border border-white/10">
+                <span className="font-bold uppercase tracking-wider text-indigo-400">
+                  {tool === "eraser" ? "Eraser" : tool === "highlighter" ? "Highlighter" : tool === "pan" ? "Pan" : tool === "laser" ? "Laser" : "Pen"}
+                </span>
+                <span className="text-zinc-600">•</span>
+                <div className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: color }} />
+                <span className="text-zinc-600">•</span>
+                <span>{penSize}px</span>
+              </div>
+              <button
+                onClick={() => setShowWhiteboard(false)}
+                className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
+              >
+                ✕ Close Board
+              </button>
+            </div>
+          </div>
+
+          {/* Canvas + Toolbars Area */}
+          <div className="flex-1 relative overflow-hidden">
+            {/* Left Toolbar */}
+            <div className="absolute left-6 top-6 z-30 max-h-[calc(100%-3rem)] overflow-y-auto rounded-2xl bg-zinc-950/90 border border-white/10 p-2 shadow-2xl backdrop-blur pointer-events-auto">
+              <Toolbar
+                tool={tool}
+                setTool={setTool}
+                color={color}
+                setColor={setColor}
+                penSize={penSize}
+                setPenSize={setPenSize}
+                undo={() => whiteboardRef.current?.undo()}
+                redo={() => whiteboardRef.current?.redo()}
+                clear={() => whiteboardRef.current?.clear()}
+                exportPNG={() => whiteboardRef.current?.exportPNG()}
+                assistTool={assistTool}
+                setAssistTool={setAssistTool}
+                zoomIn={() => whiteboardRef.current?.zoomIn()}
+                zoomOut={() => whiteboardRef.current?.zoomOut()}
+                resetView={() => whiteboardRef.current?.resetView()}
+              />
             </div>
 
-            {/* Canvas + Toolbars Area */}
-            <div className="flex-1 relative overflow-hidden">
-               {/* Left Toolbar */}
-               <div className="absolute left-6 top-6 z-30 max-h-[calc(100%-3rem)] overflow-y-auto rounded-2xl bg-zinc-950/90 border border-white/10 p-2 shadow-2xl backdrop-blur pointer-events-auto">
-                  <Toolbar
-                    tool={tool}
-                    setTool={setTool}
-                    color={color}
-                    setColor={setColor}
-                    penSize={penSize}
-                    setPenSize={setPenSize}
-                    undo={() => whiteboardRef.current?.undo()}
-                    redo={() => whiteboardRef.current?.redo()}
-                    clear={() => whiteboardRef.current?.clear()}
-                    exportPNG={() => whiteboardRef.current?.exportPNG()}
-                    assistTool={assistTool}
-                    setAssistTool={setAssistTool}
-                    zoomIn={() => whiteboardRef.current?.zoomIn()}
-                    zoomOut={() => whiteboardRef.current?.zoomOut()}
-                    resetView={() => whiteboardRef.current?.resetView()}
-                  />
-               </div>
-
-               {/* Main Canvas */}
-               <div className="w-full h-full">
-                  {sidebarOpen && (
-                    <div
-                      className="fixed inset-0 z-40 bg-black/40"
-                      onClick={() => setSidebarOpen(false)}
-                    />
-                  )}
-                  <LeftSidebar
-                    isOpen={sidebarOpen}
-                    onClose={() => setSidebarOpen(false)}
-                    settings={magicSettings}
-                    setSettings={setMagicSettings}
-                  />
-                  <WhiteboardCanvas
-                    ref={whiteboardRef}
-                    tool={tool}
-                    setTool={setTool}
-                    color={color}
-                    setColor={setColor}
-                    penSize={penSize}
-                    setPenSize={setPenSize}
-                    assistTool={assistTool}
-                    setAssistTool={setAssistTool}
-                    magicSettings={magicSettings}
-                    onEquationDetected={handleEquationDetected}
-                  />
-               </div>
-
-               {/* Graph Panels (bottom-right, above canvas) */}
-               {magicSettings.equationDetection && detectedEquations.length > 0 && (
-                 <div className="absolute bottom-6 right-24 z-30 flex flex-col-reverse gap-3 items-end max-h-[85vh] overflow-y-auto">
-                   {detectedEquations.map((eq) => (
-                     <GraphPlotter
-                       key={eq}
-                       equation={eq}
-                       onClose={() => setDetectedEquations((prev) => prev.filter((e) => e !== eq))}
-                     />
-                   ))}
-                 </div>
-               )}
-
-               {/* Magic Side Panel */}
-               <div
-                 className="absolute right-0 top-0 z-40 flex h-full w-[24rem] max-w-[90vw] items-start justify-end pt-6 pr-6 transition-all duration-300"
-                 style={{ transform: magicOpen ? "translateX(0)" : "translateX(100%)" }}
-               >
-                 <div className="pointer-events-auto max-h-[calc(100%-3rem)] overflow-y-auto rounded-3xl bg-zinc-950/95 border border-white/15 p-6 shadow-2xl backdrop-blur w-full">
-                   <div className="mb-4 flex justify-between items-center pb-3 border-b border-white/10">
-                     <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-400">✨ Magic AI Assistant</span>
-                     <button
-                       onClick={() => setMagicOpen(false)}
-                       className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition cursor-pointer"
-                     >
-                       Close
-                     </button>
-                   </div>
-                   <MagicBar
-                     settings={magicSettings}
-                     setSettings={setMagicSettings}
-                     suggestions={suggestions}
-                     onSuggestionClick={(s) => setSuggestions((cur) => [s, ...cur.filter((i) => i !== s)])}
-                   />
-                 </div>
-               </div>
+            {/* Main Canvas */}
+            <div className="w-full h-full">
+              {sidebarOpen && (
+                <div
+                  className="fixed inset-0 z-40 bg-black/40"
+                  onClick={() => setSidebarOpen(false)}
+                />
+              )}
+              <LeftSidebar
+                isOpen={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+                settings={magicSettings}
+                setSettings={setMagicSettings}
+              />
+              <WhiteboardCanvas
+                ref={whiteboardRef}
+                tool={tool}
+                setTool={setTool}
+                color={color}
+                setColor={setColor}
+                penSize={penSize}
+                setPenSize={setPenSize}
+                assistTool={assistTool}
+                setAssistTool={setAssistTool}
+                magicSettings={magicSettings}
+                onEquationDetected={handleEquationDetected}
+              />
             </div>
-         </div>
+
+            {/* Graph Panels (bottom-right, above canvas) */}
+            {magicSettings.equationDetection && detectedEquations.length > 0 && (
+              <div className="absolute bottom-6 right-24 z-30 flex flex-col-reverse gap-3 items-end max-h-[85vh] overflow-y-auto">
+                {detectedEquations.map((eq) => (
+                  <GraphPlotter
+                    key={eq}
+                    equation={eq}
+                    onClose={() => setDetectedEquations((prev) => prev.filter((e) => e !== eq))}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Magic Side Panel */}
+            <div
+              className="absolute right-0 top-0 z-40 flex h-full w-[24rem] max-w-[90vw] items-start justify-end pt-6 pr-6 transition-all duration-300"
+              style={{ transform: magicOpen ? "translateX(0)" : "translateX(100%)" }}
+            >
+              <div className="pointer-events-auto max-h-[calc(100%-3rem)] overflow-y-auto rounded-3xl bg-zinc-950/95 border border-white/15 p-6 shadow-2xl backdrop-blur w-full">
+                <div className="mb-4 flex justify-between items-center pb-3 border-b border-white/10">
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-400">✨ Magic AI Assistant</span>
+                  <button
+                    onClick={() => setMagicOpen(false)}
+                    className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+                <MagicBar
+                  settings={magicSettings}
+                  setSettings={setMagicSettings}
+                  suggestions={suggestions}
+                  onSuggestionClick={(s) => setSuggestions((cur) => [s, ...cur.filter((i) => i !== s)])}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* IN-PLACE TEXTBOOK & PDF VIEWER OVERLAY */}
       {showTextbook && (
-         <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#0a0a0c] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
-            {/* Top Bar */}
-            <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30">
-               <div className="flex items-center gap-4">
-                  <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">NCERT Textbook & Voice Viewer</span>
-                  <span className="text-xs text-zinc-400 font-medium hidden md:inline">Voice-enabled PDF highlighting & AI assistant</span>
-               </div>
-               <button
-                 onClick={() => setShowTextbook(false)}
-                 className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
-               >
-                 ✕ Close Textbook
-               </button>
+        <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#0a0a0c] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
+          {/* Top Bar */}
+          <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">NCERT Textbook & Voice Viewer</span>
+              <span className="text-xs text-zinc-400 font-medium hidden md:inline">Voice-enabled PDF highlighting & AI assistant</span>
             </div>
+            <button
+              onClick={() => setShowTextbook(false)}
+              className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
+            >
+              ✕ Close Textbook
+            </button>
+          </div>
 
-            {/* Content Area */}
-            <div className="flex-1 relative overflow-hidden bg-slate-950">
-               <TextbookView isEmbedded={true} />
-            </div>
-         </div>
+          {/* Content Area */}
+          <div className="flex-1 relative overflow-hidden bg-slate-950">
+            <TextbookView isEmbedded={true} />
+          </div>
+        </div>
       )}
 
       {/* Main Content Area */}
       <div className="flex-1 relative z-10 flex items-center justify-center p-4">
-         <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
-            {activeMedia ? (
-             <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
-                {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none rounded-xl" allowFullScreen /> )}
-                {activeMedia.type === "image" && activeMedia.url?.endsWith('.mp4') && (
-                  <video key={activeMedia.url} src={activeMedia.url} autoPlay loop muted playsInline
-                    className="w-full h-full max-w-[100%] max-h-[100%] object-contain rounded-xl shadow-2xl animate-fade-in" />
-                )}
-                {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
-                  <img src={activeMedia.url} key={activeMedia.url} className="w-full h-full max-w-[100%] max-h-[100%] object-contain rounded-xl shadow-2xl animate-fade-in" alt="" />
-                )}
-                {activeMedia.type === "formula" && (() => {
-                   const fKey = (activeMedia.key || "").toLowerCase().trim();
-                   const fData = ACCOUNTING_FORMULAS[fKey];
-                   const label = fData?.label || "Formula";
-                   const formulaStr = fData?.formula || activeMedia.key || "";
-                   const note = fData?.note || activeMedia.caption || "";
-                   // Split formula string into parts around operators for colour-coding
-                   const parts = formulaStr.split(/(\s*[=÷−+×→]\s*)/);
-                   return (
-                     <div className="flex flex-col items-center justify-center gap-8 animate-fade-up px-16 w-full">
-                       {/* Label chip */}
-                       <div className="px-8 py-2.5 bg-indigo-500/10 border border-indigo-400/20 rounded-full">
-                         <span className="text-[11px] uppercase tracking-[0.5em] font-black text-indigo-400">{label}</span>
-                       </div>
-                       {/* Formula card */}
-                       <div className="w-full max-w-4xl p-14 bg-white/[0.04] backdrop-blur-3xl border border-white/10 rounded-[48px] shadow-[0_0_100px_rgba(99,102,241,0.12)] flex flex-col items-center gap-7">
-                         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center">
-                           {parts.map((part, i) => {
-                             const trimmed = part.trim();
-                             if (!trimmed) return null;
-                             const isOp = /^[=÷−+×→]$/.test(trimmed);
-                             return (
-                               <span key={i} className={isOp
-                                 ? "text-5xl text-indigo-400/90 font-thin mx-1"
-                                 : i === 0
-                                 ? "text-[2.8rem] font-bold text-white leading-tight"
-                                 : "text-[2.8rem] font-semibold text-emerald-300/90 leading-tight"
-                               }>{trimmed}</span>
-                             );
-                           })}
-                         </div>
-                         {note && (
-                           <p className="text-sm text-white/35 tracking-wide text-center max-w-xl leading-relaxed mt-1">{note}</p>
-                         )}
-                       </div>
-                       {/* Ambient glow */}
-                       <div className="absolute inset-0 pointer-events-none rounded-full" style={{ background: "radial-gradient(ellipse at 50% 55%, rgba(99,102,241,0.07) 0%, transparent 65%)" }} />
-                     </div>
-                   );
-                })()}
-                {/* Caption */}
-                {activeMedia.caption && (
-                  <div className="absolute bottom-6 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-                    <div className="px-6 py-2 bg-black/60 backdrop-blur-xl rounded-full border border-white/10">
-                      <span className="text-[10px] text-white/60 tracking-widest">{activeMedia.caption}</span>
+        <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
+          {activeMedia ? (
+            <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
+              {activeMedia.type === "sim" && (<iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none rounded-xl" allowFullScreen />)}
+              {activeMedia.type === "image" && activeMedia.url?.endsWith('.mp4') && (
+                <video key={activeMedia.url} src={activeMedia.url} autoPlay loop muted playsInline
+                  className="w-full h-full max-w-[100%] max-h-[100%] object-contain rounded-xl shadow-2xl animate-fade-in" />
+              )}
+              {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
+                <img src={activeMedia.url} key={activeMedia.url} className="w-full h-full max-w-[100%] max-h-[100%] object-contain rounded-xl shadow-2xl animate-fade-in" alt="" />
+              )}
+              {activeMedia.type === "formula" && (() => {
+                const fKey = (activeMedia.key || "").toLowerCase().trim();
+                const fData = ACCOUNTING_FORMULAS[fKey];
+                const label = fData?.label || "Formula";
+                const formulaStr = fData?.formula || activeMedia.key || "";
+                const note = fData?.note || activeMedia.caption || "";
+                // Split formula string into parts around operators for colour-coding
+                const parts = formulaStr.split(/(\s*[=÷−+×→]\s*)/);
+                return (
+                  <div className="flex flex-col items-center justify-center gap-8 animate-fade-up px-16 w-full">
+                    {/* Label chip */}
+                    <div className="px-8 py-2.5 bg-indigo-500/10 border border-indigo-400/20 rounded-full">
+                      <span className="text-[11px] uppercase tracking-[0.5em] font-black text-indigo-400">{label}</span>
                     </div>
+                    {/* Formula card */}
+                    <div className="w-full max-w-4xl p-14 bg-white/[0.04] backdrop-blur-3xl border border-white/10 rounded-[48px] shadow-[0_0_100px_rgba(99,102,241,0.12)] flex flex-col items-center gap-7">
+                      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center">
+                        {parts.map((part, i) => {
+                          const trimmed = part.trim();
+                          if (!trimmed) return null;
+                          const isOp = /^[=÷−+×→]$/.test(trimmed);
+                          return (
+                            <span key={i} className={isOp
+                              ? "text-5xl text-indigo-400/90 font-thin mx-1"
+                              : i === 0
+                                ? "text-[2.8rem] font-bold text-white leading-tight"
+                                : "text-[2.8rem] font-semibold text-emerald-300/90 leading-tight"
+                            }>{trimmed}</span>
+                          );
+                        })}
+                      </div>
+                      {note && (
+                        <p className="text-sm text-white/35 tracking-wide text-center max-w-xl leading-relaxed mt-1">{note}</p>
+                      )}
+                    </div>
+                    {/* Ambient glow */}
+                    <div className="absolute inset-0 pointer-events-none rounded-full" style={{ background: "radial-gradient(ellipse at 50% 55%, rgba(99,102,241,0.07) 0%, transparent 65%)" }} />
                   </div>
-                )}
-             </div>
-           ) : ( <div className="flex flex-col items-center gap-4 animate-fade-in opacity-10"> <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" /> </div> )}
-         </div>
+                );
+              })()}
+              {/* Caption */}
+              {activeMedia.caption && (
+                <div className="absolute bottom-6 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                  <div className="px-6 py-2 bg-black/60 backdrop-blur-xl rounded-full border border-white/10">
+                    <span className="text-[10px] text-white/60 tracking-widest">{activeMedia.caption}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (<div className="flex flex-col items-center gap-4 animate-fade-in opacity-10"> <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" /> </div>)}
+        </div>
       </div>
 
       {/* Session Toggle, Whiteboard & Textbook Buttons */}
       <div className="absolute top-6 right-6 z-50 flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity">
-         <button
-           onClick={() => {
-             const next = !showTextbook;
-             setShowTextbook(next);
-             if (next) setShowWhiteboard(false);
-           }}
-           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showTextbook ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
-           title="Toggle NCERT Textbook & PDF Viewer"
-         >
-           📚
-         </button>
-         <button
-           onClick={() => {
-             const next = !showWhiteboard;
-             setShowWhiteboard(next);
-             if (next) setShowTextbook(false);
-           }}
-           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showWhiteboard ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
-           title="Toggle Drawing Board"
-         >
-           🎨
-         </button>
-         <button onClick={toggleSession} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/10 cursor-pointer ${isListening ? "bg-red-500/20 border-red-500/50 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse" : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`} title={isListening ? "Stop Session" : "Start Session"}>{isListening ? "⏹" : "▶"}</button>
+        <button
+          onClick={() => {
+            const next = !showTextbook;
+            setShowTextbook(next);
+            if (next) setShowWhiteboard(false);
+          }}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showTextbook ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
+          title="Toggle NCERT Textbook & PDF Viewer"
+        >
+          📚
+        </button>
+        <button
+          onClick={() => {
+            const next = !showWhiteboard;
+            setShowWhiteboard(next);
+            if (next) setShowTextbook(false);
+          }}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showWhiteboard ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
+          title="Toggle Drawing Board"
+        >
+          🎨
+        </button>
+        <button onClick={toggleSession} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/10 cursor-pointer ${isListening ? "bg-red-500/20 border-red-500/50 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse" : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`} title={isListening ? "Stop Session" : "Start Session"}>{isListening ? "⏹" : "▶"}</button>
       </div>
     </div>
   );

@@ -245,6 +245,14 @@ export default function DemoControllerPage() {
           data: changes
         }, "*");
       }
+      // [PUSHER] Also broadcast this state change globally for cross-device remote control
+      if (process.env.NEXT_PUBLIC_PUSHER_KEY) {
+        fetch("/api/pusher", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changes)
+        }).catch(err => console.error("Pusher broadcast failed:", err));
+      }
     }
   };
 
