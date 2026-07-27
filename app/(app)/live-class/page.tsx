@@ -519,6 +519,14 @@ Use the above textbook excerpts to:
       - "formula": Use when the teacher states an accounting equation.
       - "none": Use ONLY for pure greetings.
 
+      CRITICAL RULE FOR NUMERICAL EXAMPLES & PROBLEMS:
+      - When the teacher is dictating a specific example, working out a calculation, or discussing a scenario with numbers/names (e.g., "Let's take an example of a business with 50,000 capital and 10,000 drawings...", "Suppose Mr. X buys goods for 20,000..."):
+      - NEVER search for an image of a problem, question, worksheet, ledger, or numerical calculation on Google Images! Google Images will return someone else's random worksheet or textbook question with different numbers and names, which will confuse the students!
+      - Instead, when a numerical example or calculation is being discussed:
+        1. If a relevant formula/concept is already on screen, return "keep_current".
+        2. Or switch to "formula" (using one of the ACCOUNTING FORMULA KEYS like "accounting_equation", "capital", "golden_rules") so students see the clean underlying rule while the teacher calculates the numbers!
+        3. Or if you must show an image, search ONLY for a clean, generic conceptual illustration (e.g., "owner investing cash into business illustration") or a blank structure (e.g., "blank T-account format diagram"). NEVER search for solved problems, numerical examples, questions, or worksheets!
+
       CONCEPT MAP: Available block names: [${conceptMapKeys}]
       If block_name matches one, return covered_subtopics (array of string labels that were mentioned).
 
@@ -733,7 +741,9 @@ Use the above textbook excerpts to:
   const fetchGoogleImages = async (query: string, gifOnly: boolean) => {
     try {
       if (!serperKey) return null;
-      const q = gifOnly ? `${query} filetype:gif` : query;
+      // Actively filter out worksheets, exam questions, homework sheets, and numbered problems to prevent conflicting numbers on screen
+      const cleanQuery = `${query} -worksheet -homework -question -exam -"problem 1" -"problem 2" -"example 1" -"example 2" -"Q1" -"Q2"`;
+      const q = gifOnly ? `${cleanQuery} filetype:gif` : cleanQuery;
       const res = await fetch("https://google.serper.dev/images", {
         method: "POST",
         headers: {
@@ -790,16 +800,9 @@ Use the above textbook excerpts to:
         .calm-bg { backdrop-filter: blur(20px) saturate(50%); transition: all 2s ease-in-out; }
       `}</style>
 
-      {/* LAYERED CINEMATIC BACKGROUND */}
-      <div className={`absolute inset-0 z-0 pointer-events-none overflow-hidden transition-all duration-[4000ms] ease-in-out ${calmMode ? 'calm-bg' : ''}`} style={{ "--mood-color": moodMap[mood] } as any}>
-         <div className="absolute inset-0 bg-black" />
-         <div className="absolute -inset-[100%] opacity-40 animate-[spin_60s_linear_infinite]" style={{ background: `radial-gradient(circle at 50% 50%, var(--mood-color) 0%, transparent 60%)` }} />
-         <div className="absolute inset-0 backdrop-blur-[120px]" />
-         <div className={`absolute inset-0 transition-opacity duration-[3000ms] ${mood === 'space' ? 'opacity-100' : 'opacity-0'}`}>
-            <div className="absolute inset-0 star-field opacity-80" />
-            <div className="absolute inset-0 star-field opacity-40 rotate-90 scale-125" />
-         </div>
-         <div className="absolute inset-0 opacity-[0.04] pointer-events-none noise-layer" />
+      {/* CLEAN DARK BACKGROUND */}
+      <div className="absolute inset-0 z-0 pointer-events-none bg-[#0a0a0c]">
+         <div className="absolute inset-0 opacity-[0.03] pointer-events-none noise-layer" />
       </div>
 
       {/* ADHD CALMING OVERLAY */}
@@ -814,94 +817,36 @@ Use the above textbook excerpts to:
          </div>
       )}
 
-      {/* TOP TOPIC BANNER — shows block name + stage progress */}
-      <div className="absolute top-8 inset-x-0 z-50 flex justify-center pointer-events-none">
-         <div className="flex flex-col items-center gap-2">
-           <div className="px-10 py-3 bg-white/5 backdrop-blur-2xl border border-white/10 rounded-full shadow-2xl animate-fade-in flex items-center gap-4">
-             <span className="text-[10px] uppercase tracking-[0.6em] text-white/30 font-black">Teaching Block:</span>
-             <span className="text-sm font-bold tracking-widest text-indigo-400 uppercase drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">{topic}</span>
-             {blockStage && (
-               <span className="text-[9px] font-mono text-emerald-400/70 border border-emerald-400/20 px-2 py-0.5 rounded-full">
-                 Stage {blockStage.stage}/{blockStage.total}
-               </span>
-             )}
-           </div>
-           {/* Stage progress bar */}
-           {blockStage && (
-             <div className="w-48 h-0.5 bg-white/5 rounded-full overflow-hidden">
-               <div
-                 className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full transition-all duration-1000"
-                 style={{ width: `${Math.min(100, (blockStage.stage / blockStage.total) * 100)}%` }}
-               />
-             </div>
-           )}
-         </div>
-      </div>
-
-      {/* LEFT SUMMARY + CONCEPT MAP PANEL */}
-      <div className={`absolute left-6 ${showWhiteboard ? "top-6 -translate-y-0 z-50 scale-95 origin-top-left" : "top-1/2 -translate-y-1/2 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
-         {/* Teaching Intent */}
-         <div className="p-6 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
+      {/* RIGHT SUMMARY + TODO PANEL */}
+      <div className={`absolute right-6 ${showWhiteboard ? "top-20 -translate-y-0 z-50 scale-95 origin-top-right" : "top-20 -translate-y-0 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
+         {/* Summary */}
+         <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
             <div className="flex items-center gap-3">
                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
-               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/40">Teaching Intent</span>
+               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">Summary</span>
             </div>
-            <p className="text-xs leading-relaxed text-white/70 font-medium tracking-wide">{summary}</p>
+            <p className="text-xs leading-relaxed text-white/90 font-medium tracking-wide">{summary}</p>
          </div>
 
-         {/* Concept Map */}
-         {!showWhiteboard && conceptMap && conceptMap.length > 0 && (
-           <div className="p-5 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[32px] shadow-2xl animate-fade-in">
-             <div className="flex items-center gap-2 mb-4">
-               <span className="text-[9px] uppercase tracking-[0.4em] font-black text-white/30">Concept Map</span>
-               <div className="flex-1 h-px bg-white/5" />
-             </div>
-             <div className="flex flex-col gap-1.5">
-               {conceptMap.map((node, i) => (
-                 <div key={i}>
-                   <div className="flex items-center gap-2">
-                     <span className={`text-[10px] ${node.covered ? 'text-emerald-400' : 'text-white/20'}`}>
-                       {node.covered ? '✓' : '○'}
-                     </span>
-                     <span className={`text-[11px] font-medium ${node.covered ? 'text-white/80' : 'text-white/25'}`}>
-                       {node.label}
-                     </span>
-                   </div>
-                   {node.children && node.children.map((child, j) => (
-                     <div key={j} className="flex items-center gap-2 ml-4 mt-1">
-                       <span className={`text-[9px] ${child.covered ? 'text-emerald-400/70' : 'text-white/10'}`}>
-                         {child.covered ? '✓' : '·'}
-                       </span>
-                       <span className={`text-[10px] ${child.covered ? 'text-white/60' : 'text-white/15'}`}>
-                         {child.label}
-                       </span>
+         {/* ToDo List (below Summary on the right) */}
+         {!showWhiteboard && (
+            <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-up flex flex-col gap-4 pointer-events-auto">
+               <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">ToDo List</span>
+                  <span className="text-[8px] font-mono text-white/30">{todos.length} Active</span>
+               </div>
+               <div className="flex flex-col gap-2.5 max-h-40 overflow-y-auto scrollbar-thin">
+                  {todos.length > 0 ? todos.slice(-4).map((todo, i) => (
+                     <div key={i} className="flex gap-3 items-start animate-fade-in">
+                        <div className="w-1.5 h-1.5 rounded-full border border-indigo-500/50 mt-1.5 shrink-0" />
+                        <p className="text-xs text-white/80 font-medium leading-relaxed">{todo}</p>
                      </div>
-                   ))}
-                 </div>
-               ))}
-             </div>
-           </div>
+                  )) : (
+                     <p className="text-[10px] text-white/20 italic">No tasks mentioned yet...</p>
+                  )}
+               </div>
+            </div>
          )}
-      </div>
-
-      {/* BOTTOM RIGHT TODO PANEL */}
-      <div className="absolute right-6 bottom-6 w-72 z-50 pointer-events-none">
-         <div className="p-8 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[40px] shadow-2xl animate-fade-up flex flex-col gap-6">
-            <div className="flex items-center justify-between">
-               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/30">ToDo lists</span>
-               <span className="text-[8px] font-mono text-white/20">{todos.length} Active</span>
-            </div>
-            <div className="flex flex-col gap-3">
-               {todos.length > 0 ? todos.slice(-3).map((todo, i) => (
-                  <div key={i} className="flex gap-4 items-start animate-fade-in">
-                     <div className="w-1.5 h-1.5 rounded-full border border-indigo-500/50 mt-1.5 shrink-0" />
-                     <p className="text-xs text-white/60 font-medium leading-relaxed">{todo}</p>
-                  </div>
-               )) : (
-                  <p className="text-[10px] text-white/10 italic">No tasks mentioned yet...</p>
-               )}
-            </div>
-         </div>
       </div>
 
       {/* Attendance Overlay */}
@@ -991,8 +936,8 @@ Use the above textbook excerpts to:
 
             {/* Canvas + Toolbars Area */}
             <div className="flex-1 relative overflow-hidden">
-               {/* Right Toolbar */}
-               <div className="absolute right-6 top-6 z-30 max-h-[calc(100%-3rem)] overflow-y-auto rounded-2xl bg-zinc-950/90 border border-white/10 p-2 shadow-2xl backdrop-blur pointer-events-auto">
+               {/* Left Toolbar */}
+               <div className="absolute left-6 top-6 z-30 max-h-[calc(100%-3rem)] overflow-y-auto rounded-2xl bg-zinc-950/90 border border-white/10 p-2 shadow-2xl backdrop-blur pointer-events-auto">
                   <Toolbar
                     tool={tool}
                     setTool={setTool}
@@ -1056,17 +1001,17 @@ Use the above textbook excerpts to:
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 relative z-10 flex items-center justify-center px-24">
+      <div className="flex-1 relative z-10 flex items-center justify-center p-4">
          <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
             {activeMedia ? (
              <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
-                {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none" allowFullScreen /> )}
+                {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none rounded-xl" allowFullScreen /> )}
                 {activeMedia.type === "image" && activeMedia.url?.endsWith('.mp4') && (
                   <video key={activeMedia.url} src={activeMedia.url} autoPlay loop muted playsInline
-                    className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" />
+                    className="w-full h-full max-w-[100%] max-h-[100%] object-contain rounded-xl shadow-2xl animate-fade-in" />
                 )}
                 {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
-                  <img src={activeMedia.url} key={activeMedia.url} className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" alt="" />
+                  <img src={activeMedia.url} key={activeMedia.url} className="w-full h-full max-w-[100%] max-h-[100%] object-contain rounded-xl shadow-2xl animate-fade-in" alt="" />
                 )}
                 {activeMedia.type === "formula" && (() => {
                    const fKey = (activeMedia.key || "").toLowerCase().trim();
