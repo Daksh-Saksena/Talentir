@@ -55,6 +55,7 @@ const SIMS: Record<string, string> = {
 };
 
 import { VISUAL_STYLES, CONCEPT_VISUAL_TAXONOMY, CONCEPT_MAPS, ConceptNode } from "./accounting-graph";
+import { lessonRAG } from "./lesson-rag";
 
 
 // Accounting formula library — used by the formula card renderer
@@ -120,6 +121,8 @@ export default function LiveClassPage() {
   const [liveTranscript, setLiveTranscript] = useState<string[]>([]);
   const [conceptMap, setConceptMap] = useState<ConceptNode[] | null>(null);
   const [blockStage, setBlockStage] = useState<{ name: string; stage: number; total: number } | null>(null);
+  // ── Lesson RAG status ─────────────────────────────────────────────────────
+  const [ragStatus, setRagStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   
   // QUIZ, Q&A, ADHD
   const [quiz, setQuiz] = useState<{q: string, options: string[], answer: number} | null>(null);
@@ -504,6 +507,11 @@ export default function LiveClassPage() {
       studentStatsRef.current = {};
       setIsListening(true); startDeepgram();
       setLiveTranscript([]);
+      // ── Initialize Lesson RAG in the background ──────────────────────────────
+      setRagStatus('loading');
+      lessonRAG.init(apiKey, (msg) => console.log('[LessonRAG]', msg))
+        .then(() => setRagStatus(lessonRAG.isReady ? 'ready' : 'error'))
+        .catch(() => setRagStatus('error'));
     }
   };
 
@@ -538,9 +546,26 @@ export default function LiveClassPage() {
       return;
     }
 
+    // ── UNSTOPPABLE 10-SECOND HARD LOCK ─────────────────────────────────────
+    // Absolutely prevent ANY visual or block switching if the current visual
+    // has been displayed for less than 10 seconds (unless manually triggered).
+    const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
+    if (!isTrigger && activeMediaRef.current && timeSinceLastUpdate < 10000) {
+      console.log(`%c[Hard Lock] Visual locked for 10s minimum. (${Math.round(timeSinceLastUpdate/1000)}s / 10s elapsed)`, 'color: #f59e0b; font-weight: bold;');
+      setThinking("Active");
+      return;
+    }
+
     setThinking("AI Thinking...");
     try {
       // ── STAGE A: Teaching Block Detection ──────────────────────────────────
+      // Retrieve RAG context in parallel while we do block detection
+      const ragQuery = `${teachingBlockRef.current?.name || ''} ${context}`.slice(0, 1000);
+      const [ragChunks] = await Promise.all([
+        lessonRAG.retrieve(ragQuery, apiKey, 4),
+      ]);
+      const ragContext = lessonRAG.formatContext(ragChunks);
+
       // Cheap, fast call: are we still in the same teaching block?
       const currentBlock = teachingBlockRef.current;
       let sameBlock = false;
@@ -596,11 +621,22 @@ export default function LiveClassPage() {
         : "No visual is currently displayed.";
 
       const prompt = `You are an expert visual teaching assistant in a CBSE Grade 11 Accountancy classroom.
+      Board: CBSE | Grade: 11 | Subject: Accountancy | Chapter: ${lessonRAG.meta?.chapter || 'Journal'}
+      If the transcript is ambiguous, assume references belong to this chapter.
+      Do NOT jump to concepts outside this chapter unless the teacher explicitly changes subjects.
 
       PIPELINE: Teaching Block Detection -> Visual Stage -> Visual Plan
       TEACHING BLOCK: "${resolvedBlockName || 'detecting...'}"
       ${blockStageHint}
       ${taxonomyHint}
+
+      ${ragContext ? `TEXTBOOK CONTEXT (most relevant excerpts from today's chapter):
+${ragContext}
+
+Use the above textbook excerpts to:
+1. Identify precisely where in the chapter the teacher is.
+2. Select visuals that complement the exact sub-topic being explained.
+3. Stay anchored to this chapter — do not hallucinate concepts not in the excerpts.` : ''}
 
       TRANSCRIPT: "${context}"
       Current Todo List: ${JSON.stringify(todosRef.current)}.
@@ -652,7 +688,10 @@ export default function LiveClassPage() {
       ACCOUNTING FORMULA KEYS:
        ${accountingFormulasRef}
 
-      TODO LIST RULES: Return the COMPLETE merged list. Do not extract past homework checks.
+      TODO LIST / HOMEWORK RULES:
+      - NEVER invent, infer, or hallucinate general study tasks, notes, or practice suggestions!
+      - ONLY add an item if the teacher EXPLICITLY assigns homework or tasks to students in the TRANSCRIPT (e.g., "do question 5 for homework", "solve illustration 3 at home").
+      - If no new homework was explicitly assigned in this transcript chunk, return the exact existing Current Todo List unchanged!
 
       Reply ONLY valid JSON:
       {
@@ -1134,6 +1173,21 @@ export default function LiveClassPage() {
             <span className="absolute text-[8px] font-mono font-bold opacity-40">{countdown}</span>
          </div>
          <div className={`w-2 h-2 rounded-full transition-all duration-500 ${isListening && !isSpeakingRef.current ? "bg-white animate-pulse shadow-[0_0_10px_rgba(255,255,255,0.8)]" : "bg-white/10"}`} />
+         {/* Lesson RAG status indicator */}
+         {ragStatus !== 'idle' && (
+           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[8px] font-mono uppercase tracking-wider transition-all duration-500 ${
+             ragStatus === 'ready'   ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
+             ragStatus === 'loading' ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' :
+                                       'border-red-500/20 bg-red-500/10 text-red-400/60'
+           }`}>
+             <div className={`w-1 h-1 rounded-full ${
+               ragStatus === 'ready'   ? 'bg-emerald-400' :
+               ragStatus === 'loading' ? 'bg-amber-400 animate-pulse' :
+                                         'bg-red-400/60'
+             }`} />
+             {ragStatus === 'ready' ? 'Lesson RAG ✓' : ragStatus === 'loading' ? 'Indexing...' : 'RAG offline'}
+           </div>
+         )}
       </div>
 
       {/* Main Content Area */}
