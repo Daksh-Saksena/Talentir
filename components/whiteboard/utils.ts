@@ -1,5 +1,28 @@
 import { Stroke, Point } from "./types";
 
+function drawArrow(ctx: CanvasRenderingContext2D, start: Point, end: Point) {
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+
+  const angle = Math.atan2(end.y - start.y, end.x - start.x);
+  const headLength = 12;
+
+  ctx.beginPath();
+  ctx.moveTo(end.x, end.y);
+  ctx.lineTo(
+    end.x - headLength * Math.cos(angle - Math.PI / 6),
+    end.y - headLength * Math.sin(angle - Math.PI / 6)
+  );
+  ctx.lineTo(
+    end.x - headLength * Math.cos(angle + Math.PI / 6),
+    end.y - headLength * Math.sin(angle + Math.PI / 6)
+  );
+  ctx.closePath();
+  ctx.fill();
+}
+
 export function getPointerPosition(
   e: React.PointerEvent<HTMLCanvasElement>,
   canvas: HTMLCanvasElement
@@ -17,8 +40,6 @@ export function drawStroke(
   stroke: Stroke
 ) {
   if (stroke.points.length === 0) return;
-
-  ctx.beginPath();
 
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -45,25 +66,46 @@ export function drawStroke(
   ctx.lineWidth = stroke.size;
 
   const first = stroke.points[0];
+  const last = stroke.points[stroke.points.length - 1];
 
-  ctx.arc(
-    first.x,
-    first.y,
-    stroke.size / 2,
-    0,
-    Math.PI * 2
-  );
+  if (stroke.tool === "line") {
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+  } else if (stroke.tool === "rectangle") {
+    const x = Math.min(first.x, last.x);
+    const y = Math.min(first.y, last.y);
+    const width = Math.abs(last.x - first.x);
+    const height = Math.abs(last.y - first.y);
+    ctx.beginPath();
+    ctx.rect(x, y, width, height);
+    ctx.stroke();
+  } else if (stroke.tool === "circle") {
+    const radius = distance(first, last);
+    ctx.beginPath();
+    ctx.arc(first.x, first.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (stroke.tool === "arrow") {
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+    drawArrow(ctx, first, last);
+  } else {
+    ctx.beginPath();
+    ctx.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    ctx.fill();
 
-  ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
 
-  ctx.beginPath();
-  ctx.moveTo(first.x, first.y);
+    for (const point of stroke.points.slice(1)) {
+      ctx.lineTo(point.x, point.y);
+    }
 
-  for (const point of stroke.points.slice(1)) {
-    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
   }
-
-  ctx.stroke();
 
   ctx.globalAlpha = 1;
 }

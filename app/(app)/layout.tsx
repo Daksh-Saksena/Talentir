@@ -26,7 +26,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!user) return null;
 
-  if (pathname === "/live-class" || pathname === "/face-setup") {
+  if (
+    pathname === "/live-class" ||
+    pathname === "/face-setup" ||
+    pathname?.startsWith("/live-class/")
+  ) {
     return <div className="h-screen overflow-hidden bg-slate-950">{children}</div>;
   }
 
