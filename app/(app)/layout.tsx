@@ -11,7 +11,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const isStandalone = pathname === "/live-class" || pathname === "/face-setup";
+  const isStandalone = pathname === "/live-class" || pathname === "/face-setup" || pathname === "/demo-controller";
 
   useEffect(() => {
     if (!loading && !user && !isStandalone) router.push("/");
