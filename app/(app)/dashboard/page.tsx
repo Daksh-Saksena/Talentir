@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
-import { getClassSummaries, getAssignments, getLeaderboard, getTestResults, deleteSummary } from "@/lib/store";
+import { getClassSummaries, getAssignments, getTestResults, deleteSummary } from "@/lib/store";
 import Link from "next/link";
 import type { ClassSummary } from "@/types/user";
 
@@ -15,11 +15,9 @@ export default function DashboardPage() {
   }, []);
 
   const assignments = getAssignments();
-  const leaderboard = getLeaderboard();
   const results = getTestResults();
 
   const pending = assignments.filter((a) => a.status === "pending").length;
-  const myRank = leaderboard.find((e) => e.studentName === user?.name)?.rank ?? "—";
 
   const subjectColor: Record<string, string> = {
     Physics: "from-blue-500 to-cyan-500",
@@ -40,7 +38,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard icon="📝" label="Pending" value={String(pending)} color="indigo" />
         <StatCard icon="🧪" label="Tests Taken" value={String(results.length)} color="emerald" />
-        <StatCard icon="🏆" label="Your Rank" value={String(myRank)} color="amber" />
+        <StatCard icon="🔥" label="Day Streak" value="5" color="amber" />
         <StatCard icon="📚" label="Subjects" value="3" color="violet" />
       </div>
 
@@ -49,7 +47,7 @@ export default function DashboardPage() {
         <QuickLink href="/simulations" icon="⚛️" label="Simulations" />
         <QuickLink href="/assignments" icon="📝" label="Assignments" />
         <QuickLink href="/tests" icon="🧪" label="Practice Tests" />
-        <QuickLink href="/leaderboard" icon="🏆" label="Leaderboard" />
+        <QuickLink href="/feedback" icon="💬" label="Feedback" />
       </div>
 
       {/* Class Summaries */}

@@ -88,7 +88,7 @@ export default function TestsPage() {
           <span className="text-6xl">{score >= activeTest.questions.length * 0.8 ? "🎉" : score >= activeTest.questions.length * 0.5 ? "👍" : "📖"}</span>
           <h2 className="text-2xl font-bold text-white">Test Complete!</h2>
           <p className="text-4xl font-bold text-indigo-400">{score}/{activeTest.questions.length}</p>
-          <p className="text-sm text-slate-400">+{score * 20} points added to leaderboard</p>
+          <p className="text-sm text-slate-400">+{score * 20} XP earned!</p>
         </div>
         {/* Review */}
         <div className="space-y-4 mt-8">

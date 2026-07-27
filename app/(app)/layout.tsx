@@ -9,12 +9,17 @@ import { useEffect } from "react";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+
+  const isStandalone = pathname === "/live-class" || pathname === "/face-setup";
 
   useEffect(() => {
-    if (!loading && !user) router.push("/");
-  }, [loading, user, router]);
+    if (!loading && !user && !isStandalone) router.push("/");
+  }, [loading, user, router, isStandalone]);
 
-  const pathname = usePathname();
+  if (isStandalone) {
+    return <div className="h-screen overflow-hidden bg-slate-950">{children}</div>;
+  }
 
   if (loading) {
     return (
@@ -25,10 +30,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) return null;
-
-  if (pathname === "/live-class" || pathname === "/face-setup") {
-    return <div className="h-screen overflow-hidden bg-slate-950">{children}</div>;
-  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950">

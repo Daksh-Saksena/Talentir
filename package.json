@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently \"next dev\" \"node scripts/ip-proxy.js\"",
+    "dev:standalone": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "concurrently \"next start\" \"node scripts/ip-proxy.js\"",
+    "start:standalone": "next start",
     "lint": "eslint",
     "sim": "bash ./sim.sh"
   },
@@ -20,8 +22,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.4",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "http-proxy": "^1.18.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

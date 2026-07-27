@@ -6,36 +6,28 @@ import { useAuth } from "@/lib/auth";
 
 const studentLinks = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
-  { href: "/ai-tutor", label: "AI Tutor", icon: "🧑‍🏫" },
   { href: "/simulations", label: "Simulations", icon: "⚛️" },
   { href: "/assignments", label: "Assignments", icon: "📝" },
   { href: "/tests", label: "Practice Tests", icon: "🧪" },
-  { href: "/leaderboard", label: "Leaderboard", icon: "🏆" },
-  { href: "/analytics", label: "Analytics", icon: "📈" },
   { href: "/feedback", label: "Feedback", icon: "💬" },
 ];
 
 const teacherLinks = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
-  { href: "/ai-tutor", label: "AI Tutor", icon: "🧑‍🏫" },
   { href: "/simulations", label: "Simulations", icon: "⚛️" },
   { href: "/assignments", label: "Assignments", icon: "📝" },
   { href: "/tests", label: "Tests", icon: "🧪" },
   { href: "/live-class/whiteboard", label: "Whiteboard", icon: "🎨" },
-  { href: "/leaderboard", label: "Leaderboard", icon: "🏆" },
-  { href: "/analytics", label: "Analytics", icon: "📈" },
   { href: "/feedback", label: "Feedback", icon: "💬" },
 ];
 
 const adminLinks = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
-  { href: "/ai-tutor", label: "AI Tutor", icon: "🧑‍🏫" },
   { href: "/simulations", label: "Simulations", icon: "⚛️" },
   { href: "/assignments", label: "Assignments", icon: "📝" },
   { href: "/live-class/whiteboard", label: "Whiteboard", icon: "🎨" },
   { href: "/users", label: "Users", icon: "👥" },
-  { href: "/leaderboard", label: "Leaderboard", icon: "🏆" },
-  { href: "/analytics", label: "Analytics", icon: "📈" },
+  { href: "/face-setup", label: "Enrollment", icon: "📷" },
 ];
 
 export default function Sidebar() {
@@ -88,19 +80,19 @@ export default function Sidebar() {
           </div>
         </div>
         <div className="space-y-1 mt-3 pt-3 border-t border-slate-800">
-          {(user?.role === "teacher" || user?.role === "admin") && (
+          {user?.role === "admin" && (
             <Link
-              href="/live-class"
+              href={process.env.NEXT_PUBLIC_IP_PANEL_URL || "http://localhost:8000/live-class"}
               target="_blank"
               className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 transition"
             >
               <div className="flex items-center gap-3">
                 <span>📺</span> IP Panel
               </div>
-              <span className="text-[10px] uppercase tracking-widest opacity-50">Launch</span>
+              <span className="text-[10px] uppercase tracking-widest opacity-50">Launch ↗</span>
             </Link>
           )}
-          {(user?.role === "teacher" || user?.role === "admin") && (
+          {user?.role === "admin" && (
             <Link
               href="/face-setup"
               target="_blank"
@@ -109,7 +101,7 @@ export default function Sidebar() {
               <div className="flex items-center gap-3">
                 <span>📷</span> Enrollment
               </div>
-              <span className="text-[10px] uppercase tracking-widest opacity-50">Launch</span>
+              <span className="text-[10px] uppercase tracking-widest opacity-50">Launch ↗</span>
             </Link>
           )}
           <button
