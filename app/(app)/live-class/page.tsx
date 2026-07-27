@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import Toolbar from "@/components/whiteboard/Toolbar";
+import WhiteboardCanvas, { WhiteboardCanvasHandle } from "@/components/whiteboard/WhiteboardCanvas";
+import MagicBar from "@/components/whiteboard/MagicBar";
+import type { MagicSettings, Tool } from "@/components/whiteboard/types";
 
 // PhET simulation map — 60+ simulations covering physics, chemistry, biology, math
 const SIMS: Record<string, string> = {
@@ -130,6 +134,29 @@ export default function LiveClassPage() {
   const [quiz, setQuiz] = useState<{q: string, options: string[], answer: number} | null>(null);
   const [calmMode, setCalmMode] = useState(false);
   
+  // WHITEBOARD STATE
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
+  const whiteboardRef = useRef<WhiteboardCanvasHandle>(null);
+  const [tool, setTool] = useState<Tool>("pen");
+  const [color, setColor] = useState("#000000");
+  const [penSize, setPenSize] = useState(3);
+  const [magicSettings, setMagicSettings] = useState<MagicSettings>({
+    ocr: true,
+    beautify: true,
+    smartSuggestions: true,
+    equationDetection: true,
+    chemistryDetection: true,
+    shapeDetection: true,
+  });
+  const [suggestions, setSuggestions] = useState([
+    "Turn this into a neat study summary",
+    "Extract the key equations",
+    "Convert this into a labeled diagram",
+    "Highlight the important concepts",
+  ]);
+  const [assistTool, setAssistTool] = useState("none");
+  const [magicOpen, setMagicOpen] = useState(false);
+  
   // ATTENTION & PARTICIPATION
   const [attention, setAttention] = useState(0);
   const [facesDetected, setFacesDetected] = useState(0);
@@ -203,183 +230,9 @@ export default function LiveClassPage() {
     nativeRecognitionRef.current?.stop();
   };
 
-  // FACE RECOGNITION + EXPRESSION + MOUTH DETECTION ENGINE
+  // FACE RECOGNITION + EXPRESSION + MOUTH DETECTION ENGINE (Disabled for now per user request)
   useEffect(() => {
-    if (!isListening) {
-      if (faceIntervalRef.current) clearInterval(faceIntervalRef.current);
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-        videoRef.current.srcObject = null;
-      }
-      return;
-    }
-    const startCamera = async () => {
-      try {
-        let faceapi = (window as any).faceapi;
-        if (!faceapi) {
-          // Prevent duplicate script loading
-          if (!document.querySelector('script[src*="face-api"]')) {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
-            s.onload = () => startCamera();
-            document.head.appendChild(s);
-          } else {
-            setTimeout(() => startCamera(), 500);
-          }
-          return;
-        }
-        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-        ]);
-        console.log('%c[Talantir] All face models loaded', 'color: #10b981;');
-
-        // Build face matcher from enrolled profiles
-        const savedProfiles = JSON.parse(localStorage.getItem('cc-face-profiles') || '[]');
-        let faceMatcher: any = null;
-        if (savedProfiles.length > 0) {
-          const labeledDescriptors = savedProfiles.map((p: any) =>
-            new faceapi.LabeledFaceDescriptors(p.name, [new Float32Array(p.descriptor)])
-          );
-          faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.55);
-          console.log(`%c[Talantir] Face matcher ready with ${savedProfiles.length} profiles`, 'color: #6366f1;');
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' } });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          // autoPlay on the element handles playback
-        }
-
-        faceIntervalRef.current = setInterval(async () => {
-          if (!videoRef.current || videoRef.current.paused) return;
-          try {
-            faceapi = (window as any).faceapi;
-            const detections = await faceapi
-              .detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.35 }))
-              .withFaceLandmarks()
-              .withFaceExpressions()
-              .withFaceDescriptors();
-            const count = detections.length;
-            setFacesDetected(count);
-            if (count === 0) { setAttention(0); return; }
-
-            let totalAttention = 0, totalInterest = 0, totalConfusion = 0, totalBoredom = 0;
-            const speakersThisFrame: string[] = [];
-
-            // Clear debug canvas before drawing new frame
-            const dbgCanvas = debugCanvasRef.current;
-            if (dbgCanvas && videoRef.current) {
-              dbgCanvas.width = videoRef.current.videoWidth || 320;
-              dbgCanvas.height = videoRef.current.videoHeight || 240;
-              const dbgCtx = dbgCanvas.getContext('2d');
-              if (dbgCtx) dbgCtx.clearRect(0, 0, dbgCanvas.width, dbgCanvas.height);
-            }
-
-            detections.forEach((d: any) => {
-              const exp = d.expressions;
-              // Expression-based attention
-              const attentive = (exp.neutral || 0) * 0.8 + (exp.happy || 0) * 0.9 + (exp.surprised || 0) * 0.3;
-              const confused = (exp.surprised || 0) * 0.6 + (exp.fearful || 0) * 0.8;
-              const bored = (exp.sad || 0) * 0.9 + (exp.disgusted || 0) * 0.7 + (exp.angry || 0) * 0.5;
-              totalAttention += Math.min(1, attentive);
-              totalInterest += Math.min(1, attentive);
-              totalConfusion += Math.min(1, confused);
-              totalBoredom += Math.min(1, bored);
-
-              // Identify the person
-              let personName = 'Unknown';
-              if (faceMatcher) {
-                const match = faceMatcher.findBestMatch(d.descriptor);
-                if (match.label !== 'unknown') personName = match.label;
-              }
-
-              // Track per-student stats
-              if (personName !== 'Unknown') {
-                const now = Date.now();
-                if (!studentStatsRef.current[personName]) {
-                  studentStatsRef.current[personName] = { attentionSum: 0, attentionCount: 0, speakingCount: 0, confusionSum: 0, boredomSum: 0, firstSeen: now, lastSeen: now };
-                }
-                const s = studentStatsRef.current[personName];
-                s.attentionSum += Math.min(1, attentive);
-                s.confusionSum += Math.min(1, confused);
-                s.boredomSum += Math.min(1, bored);
-                s.attentionCount += 1;
-                s.lastSeen = now;
-              }
-
-              // Mouth Aspect Ratio (MAR) to detect speaking
-              let isTalking = false;
-              const landmarks = d.landmarks.positions;
-              if (landmarks.length >= 68) {
-                const upperLip = landmarks[62];
-                const lowerLip = landmarks[66];
-                const leftMouth = landmarks[60];
-                const rightMouth = landmarks[64];
-                const mouthHeight = Math.abs(upperLip.y - lowerLip.y);
-                const mouthWidth = Math.abs(rightMouth.x - leftMouth.x);
-                const mar = mouthWidth > 0 ? mouthHeight / mouthWidth : 0;
-                if (mar > 0.25) {
-                  isTalking = true;
-                  if (personName !== 'Unknown') {
-                    speakersThisFrame.push(personName);
-                    if (studentStatsRef.current[personName]) {
-                      studentStatsRef.current[personName].speakingCount += 1;
-                    }
-                  }
-                }
-              }
-
-              // Draw debug box on canvas overlay
-              const canvas = debugCanvasRef.current;
-              if (canvas) {
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  const box = d.detection.box;
-                  const attnPct = Math.round(Math.min(1, attentive) * 100);
-                  const boxColor = isTalking ? '#22d3ee' : (attnPct > 60 ? '#10b981' : attnPct > 30 ? '#f59e0b' : '#ef4444');
-                  // Box
-                  ctx.strokeStyle = boxColor;
-                  ctx.lineWidth = 2;
-                  ctx.strokeRect(box.x, box.y, box.width, box.height);
-                  // Label background
-                  const label = `${personName} ${attnPct}% ${isTalking ? '🗣️' : ''}`;
-                  ctx.font = '10px monospace';
-                  const textW = ctx.measureText(label).width + 8;
-                  ctx.fillStyle = 'rgba(0,0,0,0.7)';
-                  ctx.fillRect(box.x, box.y - 16, textW, 16);
-                  // Label text
-                  ctx.fillStyle = boxColor;
-                  ctx.fillText(label, box.x + 4, box.y - 4);
-                }
-              }
-            });
-
-            // Update attention & engagement
-            setAttention(Math.round((totalAttention / count) * 100));
-            setEngagement({
-              interest: Math.round((totalInterest / count) * 100),
-              confusion: Math.round((totalConfusion / count) * 100),
-              boredom: Math.round((totalBoredom / count) * 100),
-            });
-
-            // Update participation for detected speakers
-            if (speakersThisFrame.length > 0) {
-              setParticipation(prev => {
-                const updated = { ...prev };
-                speakersThisFrame.forEach(name => { updated[name] = (updated[name] || 0) + 1; });
-                return updated;
-              });
-            }
-          } catch(e) {}
-        }, 2500);
-      } catch(e) { console.log('[Attention] Camera unavailable:', e); }
-    };
-    startCamera();
-    return () => { if (faceIntervalRef.current) clearInterval(faceIntervalRef.current); };
+    // Disabled camera and attention tracking
   }, [isListening]);
 
   const processTranscript = (cleaned: string) => {
@@ -986,9 +839,9 @@ Use the above textbook excerpts to:
       </div>
 
       {/* LEFT SUMMARY + CONCEPT MAP PANEL */}
-      <div className="absolute left-6 top-1/2 -translate-y-1/2 w-72 z-50 pointer-events-none flex flex-col gap-4">
+      <div className={`absolute left-6 ${showWhiteboard ? "top-6 -translate-y-0 z-50 scale-95 origin-top-left" : "top-1/2 -translate-y-1/2 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
          {/* Teaching Intent */}
-         <div className="p-6 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3">
+         <div className="p-6 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
             <div className="flex items-center gap-3">
                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
                <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/40">Teaching Intent</span>
@@ -997,7 +850,7 @@ Use the above textbook excerpts to:
          </div>
 
          {/* Concept Map */}
-         {conceptMap && conceptMap.length > 0 && (
+         {!showWhiteboard && conceptMap && conceptMap.length > 0 && (
            <div className="p-5 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[32px] shadow-2xl animate-fade-in">
              <div className="flex items-center gap-2 mb-4">
                <span className="text-[9px] uppercase tracking-[0.4em] font-black text-white/30">Concept Map</span>
@@ -1100,185 +953,184 @@ Use the above textbook excerpts to:
 
 
 
-      {/* ATTENTION & ENGAGEMENT PANEL — Top Right */}
-      {isListening && (
-        <div className="absolute top-20 right-6 z-40 flex flex-col gap-3 items-end">
-          {/* Camera PiP with Debug Overlay */}
-          <div className="relative w-52 h-40 rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-black/50">
-            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover opacity-80" />
-            <canvas ref={debugCanvasRef} className="absolute inset-0 w-full h-full" />
-            <div className="absolute bottom-1.5 left-2 flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-[8px] font-mono text-white/60">{facesDetected} faces</span>
-            </div>
-          </div>
 
-          {/* Attention Ring */}
-          <div className="relative w-16 h-16 flex items-center justify-center">
-            <svg className="w-full h-full -rotate-90">
-              <circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.05)" strokeWidth="2" fill="none" />
-              <circle cx="32" cy="32" r="28" stroke={attention > 60 ? '#10b981' : attention > 30 ? '#f59e0b' : '#ef4444'} strokeWidth="2" fill="none" strokeDasharray="176" strokeDashoffset={176 * (1 - attention / 100)} className="transition-all duration-1000" />
-            </svg>
-            <div className="absolute flex flex-col items-center">
-              <span className="text-sm font-bold text-white">{attention}%</span>
-              <span className="text-[7px] uppercase tracking-widest text-white/30">Attn</span>
-            </div>
-          </div>
 
-          {/* Engagement Toggle */}
-          <button onClick={() => setShowEngagement(!showEngagement)} className="px-3 py-1.5 rounded-xl border border-white/5 bg-white/5 text-[9px] text-white/40 uppercase tracking-widest hover:bg-white/10 transition">
-            {showEngagement ? '✕ Hide' : '📊 Engagement'}
-          </button>
-
-          {/* Engagement Bars */}
-          {showEngagement && (
-            <div className="w-48 p-4 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-2xl space-y-2.5 animate-fade-in">
-              <span className="text-[8px] uppercase tracking-[0.4em] font-black text-white/30 block mb-2">Engagement</span>
-              {[{label: 'Interest', val: engagement.interest, color: '#6366f1'}, {label: 'Confusion', val: engagement.confusion, color: '#f59e0b'}, {label: 'Boredom', val: engagement.boredom, color: '#ef4444'}].map(e => (
-                <div key={e.label} className="flex items-center gap-2">
-                  <span className="text-[9px] text-white/40 w-16">{e.label}</span>
-                  <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${e.val}%`, backgroundColor: e.color }} />
-                  </div>
-                  <span className="text-[8px] font-mono text-white/30 w-8 text-right">{e.val}%</span>
-                </div>
-              ))}
-              {/* Top Participants */}
-              <div className="mt-3 pt-3 border-t border-white/5">
-                <span className="text-[8px] uppercase tracking-[0.4em] font-black text-white/30 block mb-2">Speakers</span>
-                {Object.entries(participation).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, count]) => (
-                  <div key={name} className="flex justify-between items-center py-0.5">
-                    <span className="text-[9px] text-white/50">{name}</span>
-                    <div className="flex items-center gap-1">
-                      <div className="w-12 h-1 bg-white/5 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full bg-indigo-500/60" style={{ width: `${Math.min(100, count * 10)}%` }} />
-                      </div>
-                      <span className="text-[8px] font-mono text-white/30">{count}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* BOTTOM LEFT LIVE TRANSCRIPT PANEL */}
-      {isListening && (
-         <div className="absolute left-6 bottom-20 w-72 z-50 pointer-events-none">
-            <div className="p-6 bg-black/40 backdrop-blur-3xl border border-white/5 rounded-[30px] shadow-2xl animate-fade-in flex flex-col gap-3">
-               <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/30">Live Transcript</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+      {/* IN-PLACE DRAWING BOARD OVERLAY */}
+      {showWhiteboard && (
+         <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#171717] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
+            {/* Top Bar */}
+            <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30 pl-[340px]">
+               <div className="flex items-center gap-4">
+                  <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">Drawing Board</span>
+                  <button
+                    onClick={() => setMagicOpen((value) => !value)}
+                    className="rounded-full bg-blue-600/20 px-4 py-1 text-xs font-semibold text-blue-200 transition hover:bg-blue-600/30 border border-blue-500/30 cursor-pointer"
+                  >
+                    ✨ Magic AI
+                  </button>
+                  <span className="text-xs text-zinc-400 font-medium hidden md:inline">Draw diagrams, write equations, or summarize concepts</span>
                </div>
-               <div className="max-h-24 overflow-y-auto scrollbar-thin text-xs text-white/70 space-y-1.5 pointer-events-auto leading-relaxed">
-                  {liveTranscript.length > 0 ? liveTranscript.map((line, idx) => (
-                     <p key={idx} className="border-l-2 border-indigo-500/30 pl-2 animate-fade-in">{line}</p>
-                  )) : (
-                     <p className="text-[10px] text-white/20 italic">Awaiting speech...</p>
-                  )}
+               <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 rounded-full bg-zinc-900/90 px-4 py-1.5 text-xs text-zinc-200 border border-white/10">
+                     <span className="font-bold uppercase tracking-wider text-indigo-400">
+                        {tool === "eraser" ? "Eraser" : tool === "highlighter" ? "Highlighter" : tool === "pan" ? "Pan" : tool === "laser" ? "Laser" : "Pen"}
+                     </span>
+                     <span className="text-zinc-600">•</span>
+                     <div className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: color }} />
+                     <span className="text-zinc-600">•</span>
+                     <span>{penSize}px</span>
+                  </div>
+                  <button
+                    onClick={() => setShowWhiteboard(false)}
+                    className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
+                  >
+                    ✕ Close Board
+                  </button>
+               </div>
+            </div>
+
+            {/* Canvas + Toolbars Area */}
+            <div className="flex-1 relative overflow-hidden">
+               {/* Right Toolbar */}
+               <div className="absolute right-6 top-6 z-30 max-h-[calc(100%-3rem)] overflow-y-auto rounded-2xl bg-zinc-950/90 border border-white/10 p-2 shadow-2xl backdrop-blur pointer-events-auto">
+                  <Toolbar
+                    tool={tool}
+                    setTool={setTool}
+                    color={color}
+                    setColor={setColor}
+                    penSize={penSize}
+                    setPenSize={setPenSize}
+                    undo={() => whiteboardRef.current?.undo()}
+                    redo={() => whiteboardRef.current?.redo()}
+                    clear={() => whiteboardRef.current?.clear()}
+                    exportPNG={() => whiteboardRef.current?.exportPNG()}
+                    assistTool={assistTool}
+                    setAssistTool={setAssistTool}
+                    zoomIn={() => whiteboardRef.current?.zoomIn()}
+                    zoomOut={() => whiteboardRef.current?.zoomOut()}
+                    resetView={() => whiteboardRef.current?.resetView()}
+                  />
+               </div>
+
+               {/* Main Canvas */}
+               <div className="w-full h-full">
+                  <WhiteboardCanvas
+                    ref={whiteboardRef}
+                    tool={tool}
+                    setTool={setTool}
+                    color={color}
+                    setColor={setColor}
+                    penSize={penSize}
+                    setPenSize={setPenSize}
+                    assistTool={assistTool}
+                    setAssistTool={setAssistTool}
+                    magicSettings={magicSettings}
+                  />
+               </div>
+
+               {/* Magic Side Panel */}
+               <div
+                 className="absolute right-0 top-0 z-40 flex h-full w-[24rem] max-w-[90vw] items-start justify-end pt-6 pr-6 transition-all duration-300"
+                 style={{ transform: magicOpen ? "translateX(0)" : "translateX(100%)" }}
+               >
+                 <div className="pointer-events-auto max-h-[calc(100%-3rem)] overflow-y-auto rounded-3xl bg-zinc-950/95 border border-white/15 p-6 shadow-2xl backdrop-blur w-full">
+                   <div className="mb-4 flex justify-between items-center pb-3 border-b border-white/10">
+                     <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-400">✨ Magic AI Assistant</span>
+                     <button
+                       onClick={() => setMagicOpen(false)}
+                       className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition cursor-pointer"
+                     >
+                       Close
+                     </button>
+                   </div>
+                   <MagicBar
+                     settings={magicSettings}
+                     setSettings={setMagicSettings}
+                     suggestions={suggestions}
+                     onSuggestionClick={(s) => setSuggestions((cur) => [s, ...cur.filter((i) => i !== s)])}
+                   />
+                 </div>
                </div>
             </div>
          </div>
       )}
-
-      {/* Mic/Sync Status Corner */}
-      <div className="absolute bottom-6 left-6 z-30 flex items-center gap-6">
-         <div className="relative w-8 h-8 flex items-center justify-center">
-            <svg className="w-full h-full -rotate-90">
-               <circle cx="16" cy="16" r="14" stroke="rgba(255,255,255,0.05)" strokeWidth="1.5" fill="none" />
-               <circle cx="16" cy="16" r="14" stroke="white" strokeWidth="1.5" fill="none" strokeDasharray="88" strokeDashoffset={88 * (1 - countdown/30)} className="transition-all duration-1000 ease-linear opacity-20" />
-            </svg>
-            <span className="absolute text-[8px] font-mono font-bold opacity-40">{countdown}</span>
-         </div>
-         <div className={`w-2 h-2 rounded-full transition-all duration-500 ${isListening && !isSpeakingRef.current ? "bg-white animate-pulse shadow-[0_0_10px_rgba(255,255,255,0.8)]" : "bg-white/10"}`} />
-         {/* Lesson RAG status indicator */}
-         {ragStatus !== 'idle' && (
-           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[8px] font-mono uppercase tracking-wider transition-all duration-500 ${
-             ragStatus === 'ready'   ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
-             ragStatus === 'loading' ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' :
-                                       'border-red-500/20 bg-red-500/10 text-red-400/60'
-           }`}>
-             <div className={`w-1 h-1 rounded-full ${
-               ragStatus === 'ready'   ? 'bg-emerald-400' :
-               ragStatus === 'loading' ? 'bg-amber-400 animate-pulse' :
-                                         'bg-red-400/60'
-             }`} />
-             {ragStatus === 'ready' ? 'Lesson RAG ✓' : ragStatus === 'loading' ? 'Indexing...' : 'RAG offline'}
-           </div>
-         )}
-      </div>
 
       {/* Main Content Area */}
       <div className="flex-1 relative z-10 flex items-center justify-center px-24">
-        <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
-           {activeMedia ? (
-            <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
-               {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none" allowFullScreen /> )}
-               {activeMedia.type === "image" && activeMedia.url?.endsWith('.mp4') && (
-                 <video key={activeMedia.url} src={activeMedia.url} autoPlay loop muted playsInline
-                   className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" />
-               )}
-               {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
-                 <img src={activeMedia.url} key={activeMedia.url} className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" alt="" />
-               )}
-               {activeMedia.type === "formula" && (() => {
-                  const fKey = (activeMedia.key || "").toLowerCase().trim();
-                  const fData = ACCOUNTING_FORMULAS[fKey];
-                  const label = fData?.label || "Formula";
-                  const formulaStr = fData?.formula || activeMedia.key || "";
-                  const note = fData?.note || activeMedia.caption || "";
-                  // Split formula string into parts around operators for colour-coding
-                  const parts = formulaStr.split(/(\s*[=÷−+×→]\s*)/);
-                  return (
-                    <div className="flex flex-col items-center justify-center gap-8 animate-fade-up px-16 w-full">
-                      {/* Label chip */}
-                      <div className="px-8 py-2.5 bg-indigo-500/10 border border-indigo-400/20 rounded-full">
-                        <span className="text-[11px] uppercase tracking-[0.5em] font-black text-indigo-400">{label}</span>
-                      </div>
-                      {/* Formula card */}
-                      <div className="w-full max-w-4xl p-14 bg-white/[0.04] backdrop-blur-3xl border border-white/10 rounded-[48px] shadow-[0_0_100px_rgba(99,102,241,0.12)] flex flex-col items-center gap-7">
-                        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center">
-                          {parts.map((part, i) => {
-                            const trimmed = part.trim();
-                            if (!trimmed) return null;
-                            const isOp = /^[=÷−+×→]$/.test(trimmed);
-                            return (
-                              <span key={i} className={isOp
-                                ? "text-5xl text-indigo-400/90 font-thin mx-1"
-                                : i === 0
-                                ? "text-[2.8rem] font-bold text-white leading-tight"
-                                : "text-[2.8rem] font-semibold text-emerald-300/90 leading-tight"
-                              }>{trimmed}</span>
-                            );
-                          })}
-                        </div>
-                        {note && (
-                          <p className="text-sm text-white/35 tracking-wide text-center max-w-xl leading-relaxed mt-1">{note}</p>
-                        )}
-                      </div>
-                      {/* Ambient glow */}
-                      <div className="absolute inset-0 pointer-events-none rounded-full" style={{ background: "radial-gradient(ellipse at 50% 55%, rgba(99,102,241,0.07) 0%, transparent 65%)" }} />
+         <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
+            {activeMedia ? (
+             <div className="w-full h-full relative group flex items-center justify-center overflow-hidden">
+                {activeMedia.type === "sim" && ( <iframe src={`https://phet.colorado.edu/sims/html/${activeMedia.key}/latest/${activeMedia.key}_en.html`} className="w-full h-full border-none" allowFullScreen /> )}
+                {activeMedia.type === "image" && activeMedia.url?.endsWith('.mp4') && (
+                  <video key={activeMedia.url} src={activeMedia.url} autoPlay loop muted playsInline
+                    className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" />
+                )}
+                {activeMedia.type === "image" && !activeMedia.url?.endsWith('.mp4') && (
+                  <img src={activeMedia.url} key={activeMedia.url} className="max-w-[95%] max-h-[95%] object-contain rounded-[60px] shadow-2xl animate-fade-in" alt="" />
+                )}
+                {activeMedia.type === "formula" && (() => {
+                   const fKey = (activeMedia.key || "").toLowerCase().trim();
+                   const fData = ACCOUNTING_FORMULAS[fKey];
+                   const label = fData?.label || "Formula";
+                   const formulaStr = fData?.formula || activeMedia.key || "";
+                   const note = fData?.note || activeMedia.caption || "";
+                   // Split formula string into parts around operators for colour-coding
+                   const parts = formulaStr.split(/(\s*[=÷−+×→]\s*)/);
+                   return (
+                     <div className="flex flex-col items-center justify-center gap-8 animate-fade-up px-16 w-full">
+                       {/* Label chip */}
+                       <div className="px-8 py-2.5 bg-indigo-500/10 border border-indigo-400/20 rounded-full">
+                         <span className="text-[11px] uppercase tracking-[0.5em] font-black text-indigo-400">{label}</span>
+                       </div>
+                       {/* Formula card */}
+                       <div className="w-full max-w-4xl p-14 bg-white/[0.04] backdrop-blur-3xl border border-white/10 rounded-[48px] shadow-[0_0_100px_rgba(99,102,241,0.12)] flex flex-col items-center gap-7">
+                         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center">
+                           {parts.map((part, i) => {
+                             const trimmed = part.trim();
+                             if (!trimmed) return null;
+                             const isOp = /^[=÷−+×→]$/.test(trimmed);
+                             return (
+                               <span key={i} className={isOp
+                                 ? "text-5xl text-indigo-400/90 font-thin mx-1"
+                                 : i === 0
+                                 ? "text-[2.8rem] font-bold text-white leading-tight"
+                                 : "text-[2.8rem] font-semibold text-emerald-300/90 leading-tight"
+                               }>{trimmed}</span>
+                             );
+                           })}
+                         </div>
+                         {note && (
+                           <p className="text-sm text-white/35 tracking-wide text-center max-w-xl leading-relaxed mt-1">{note}</p>
+                         )}
+                       </div>
+                       {/* Ambient glow */}
+                       <div className="absolute inset-0 pointer-events-none rounded-full" style={{ background: "radial-gradient(ellipse at 50% 55%, rgba(99,102,241,0.07) 0%, transparent 65%)" }} />
+                     </div>
+                   );
+                })()}
+                {/* Caption */}
+                {activeMedia.caption && (
+                  <div className="absolute bottom-6 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                    <div className="px-6 py-2 bg-black/60 backdrop-blur-xl rounded-full border border-white/10">
+                      <span className="text-[10px] text-white/60 tracking-widest">{activeMedia.caption}</span>
                     </div>
-                  );
-               })()}
-               {/* Caption */}
-               {activeMedia.caption && (
-                 <div className="absolute bottom-6 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-                   <div className="px-6 py-2 bg-black/60 backdrop-blur-xl rounded-full border border-white/10">
-                     <span className="text-[10px] text-white/60 tracking-widest">{activeMedia.caption}</span>
-                   </div>
-                 </div>
-               )}
-            </div>
-          ) : ( <div className="flex flex-col items-center gap-4 animate-fade-in opacity-10"> <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" /> </div> )}
-        </div>
+                  </div>
+                )}
+             </div>
+           ) : ( <div className="flex flex-col items-center gap-4 animate-fade-in opacity-10"> <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" /> </div> )}
+         </div>
       </div>
 
-      {/* Session Toggle & Whiteboard Link */}
-      <div className="absolute top-6 right-6 z-30 flex items-center gap-3 opacity-10 hover:opacity-100 transition-opacity">
-         <Link href="/live-class/whiteboard" target="_blank" className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/5 bg-white/5 text-white/40 hover:text-white hover:bg-white/10" title="Open Interactive Whiteboard">🎨</Link>
-         <button onClick={toggleSession} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/5 ${isListening ? "bg-white/10 text-white" : "bg-white/5 text-white/40"}`}>{isListening ? "⏹" : "▶"}</button>
+      {/* Session Toggle & Whiteboard Button */}
+      <div className="absolute top-6 right-6 z-50 flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity">
+         <button
+           onClick={() => setShowWhiteboard(!showWhiteboard)}
+           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showWhiteboard ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
+           title="Toggle Drawing Board"
+         >
+           🎨
+         </button>
+         <button onClick={toggleSession} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/10 cursor-pointer ${isListening ? "bg-red-500/20 border-red-500/50 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse" : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`} title={isListening ? "Stop Session" : "Start Session"}>{isListening ? "⏹" : "▶"}</button>
       </div>
     </div>
   );
