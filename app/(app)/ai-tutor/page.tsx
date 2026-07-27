@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import simulations from "@/data/simulations";
 import type { Simulation } from "@/types/simulation";
+import Script from "next/script";
+
 
 interface Message {
   id: string;
@@ -96,6 +98,31 @@ export default function AITutorPage() {
   const [activeSim, setActiveSim] = useState<Simulation | null>(null);
   const [activeMapTopic, setActiveMapTopic] = useState<string>("physics");
 
+  // Desmos state and references
+  const [desmosLoaded, setDesmosLoaded] = useState(false);
+  const [calculatorEquation, setCalculatorEquation] = useState<string | null>(null);
+  const calculatorContainerRef = useRef<HTMLDivElement>(null);
+  const calculatorRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (activePane === "calculator" && desmosLoaded && calculatorContainerRef.current) {
+      if (!calculatorRef.current) {
+        calculatorContainerRef.current.innerHTML = "";
+        calculatorRef.current = (window as any).Desmos.GraphingCalculator(calculatorContainerRef.current, {
+          keypad: true,
+          expressions: true,
+          settingsMenu: true,
+        });
+      }
+      if (calculatorEquation && calculatorRef.current) {
+        calculatorRef.current.setExpression({
+          id: 'ai-expression',
+          latex: calculatorEquation
+        });
+      }
+    }
+  }, [activePane, desmosLoaded, calculatorEquation]);
+
   // Simulated Simulation controls
   const [simParams, setSimParams] = useState<Record<string, number>>({
     voltage: 4.5,
@@ -176,7 +203,7 @@ Registered Simulations (only load matching id):
 ${JSON.stringify(simplifiedSims)}
 
 Other Interactive Canvas Tools:
-- Desmos Graphing Calculator: type="calculator", id="desmos", label="Open Graphing Calculator", icon="📊" (use this if they ask for plotting, graphing, mathematical functions like sin/cos curves, quadratic equations, etc.)
+- Desmos Graphing Calculator: type="calculator", id="desmos", label="Open Graphing Calculator", icon="📊" (use this if they ask for plotting, graphing, mathematical functions like sin/cos curves, quadratic equations, etc. You MUST provide the LaTeX math expression/equation to plot in params.equation, e.g. {"equation": "y = \\\\sin(x)"} or {"equation": "y = x^2"})
 - Concept Mind Maps: type="mindmap", id="physics" | "chemistry" | "math", label="View Mind Map", icon="🧠"
 - Practice tests/evaluation: type="test", id="tests", label="View Practice Tests", icon="✍️"
 ${!isStudent ? '- Whiteboard: type="whiteboard", id="wb", label="View Whiteboard", icon="🎨"' : ''}
@@ -189,7 +216,7 @@ You MUST return a JSON object with:
     "id": "the matched simulation id or tool id",
     "label": "Action button text",
     "icon": "badge emoji",
-    "params": { ... } // optional parameters, e.g. for Ohm's Law: {"voltage": 9.0}
+    "params": { ... } // optional parameters, e.g. for Ohm's Law: {"voltage": 9.0}, for Desmos Calculator: {"equation": "y = \\\\sin(x)"}
   } // (omit action property if no match is relevant)
 }`;
 
@@ -233,6 +260,8 @@ You MUST return a JSON object with:
           setActivePane("mindmap");
           setPaneOpen(true);
         } else if (action.type === "calculator") {
+          const eq = String(action.params?.equation || action.params?.expression || "y=\\sin(x)");
+          setCalculatorEquation(eq);
           setActivePane("calculator");
           setPaneOpen(true);
         }
@@ -253,7 +282,27 @@ You MUST return a JSON object with:
       let action: Message["action"] | undefined = undefined;
       const lower = query.toLowerCase();
 
-      if (lower.includes("sin") || lower.includes("sine") || lower.includes("cos") || lower.includes("tan") || lower.includes("trig")) {
+      if (lower.includes("graph") || lower.includes("plot") || lower.includes("calculator") || lower.includes("desmos")) {
+        replyText = "I have opened the Desmos Graphing Calculator with the function plotted for you. You can examine its properties or modify it directly on the screen.";
+        let eq = "y=\\sin(x)";
+        if (lower.includes("cos")) {
+          eq = "y=\\cos(x)";
+        } else if (lower.includes("tan")) {
+          eq = "y=\\tan(x)";
+        } else if (lower.includes("x^2") || lower.includes("quadratic")) {
+          eq = "y=x^2";
+        }
+        action = { 
+          type: "calculator", 
+          id: "desmos", 
+          label: "Open Graphing Calculator", 
+          icon: "📊",
+          params: { equation: eq }
+        };
+        setCalculatorEquation(eq);
+        setActivePane("calculator");
+        setPaneOpen(true);
+      } else if (lower.includes("sin") || lower.includes("sine") || lower.includes("cos") || lower.includes("tan") || lower.includes("trig")) {
         replyText = "The sine function sin(x) represents the periodic y-coordinate on a unit circle. It starts at 0, increases to 1 at 90 degrees, falls to 0 at 180, drops to -1 at 270, and returns to 0 at 360 degrees. Let's open the Trig Tour simulation so you can visualize this periodic wave!";
         const trigSim = simulations.find(s => s.id === "trig-tour");
         if (trigSim) {
@@ -400,15 +449,12 @@ You MUST return a JSON object with:
               </div>
             )}
             
-            {activePane === "calculator" && (
-              <iframe
-                src="https://www.desmos.com/calculator"
-                title="Desmos Grapher"
-                width="100%"
-                height="100%"
-                className="w-full h-full border-0 bg-white"
-              />
-            )}
+            <div 
+              style={{ display: activePane === "calculator" ? "block" : "none" }}
+              className="w-full h-full bg-white text-black"
+              ref={calculatorContainerRef}
+              id="desmos-calculator-container"
+            />
 
             {activePane === "test" && (
               <iframe
@@ -573,6 +619,8 @@ You MUST return a JSON object with:
                         setActivePane("mindmap");
                         setPaneOpen(true);
                       } else if (m.action?.type === "calculator") {
+                        const eq = String(m.action.params?.equation || m.action.params?.expression || "y=\\sin(x)");
+                        setCalculatorEquation(eq);
                         setActivePane("calculator");
                         setPaneOpen(true);
                       }
@@ -629,6 +677,10 @@ You MUST return a JSON object with:
           </button>
         </div>
       </div>
+      <Script
+        src="https://www.desmos.com/api/v1.9/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6"
+        onLoad={() => setDesmosLoaded(true)}
+      />
     </div>
   );
 }

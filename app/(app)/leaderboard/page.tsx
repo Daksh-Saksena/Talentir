@@ -32,11 +32,11 @@ export default function LeaderboardPage() {
     <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Leaderboard</h1>
-          <p className="text-sm text-slate-400 mt-1">Celebrate top performers and check your ranking.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Leaderboard</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Celebrate top performers and check your ranking.</p>
         </div>
         <div className="flex gap-2">
-          <span className="px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-400">
+          <span className="px-3 py-1 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
             Active Season
           </span>
         </div>
@@ -44,7 +44,7 @@ export default function LeaderboardPage() {
 
       {/* Podium for Top 3 */}
       {topThree.length > 0 && (
-        <div className="flex justify-center items-end gap-3 sm:gap-6 pt-6 pb-2 border-b border-slate-800/40">
+        <div className="flex justify-center items-end gap-3 sm:gap-6 pt-6 pb-2 border-b border-slate-200 dark:border-slate-800/40">
           {podiumOrder.map((entry) => {
             const index = topThree.indexOf(entry);
             const cfg = podiumConfig[index] ?? podiumConfig[2];
@@ -62,13 +62,13 @@ export default function LeaderboardPage() {
                   </div>
                 </div>
                 {/* Details */}
-                <p className="text-xs sm:text-sm font-bold text-white truncate w-full text-center">{entry.studentName}</p>
+                <p className="text-xs sm:text-sm font-bold text-slate-800 dark:text-white truncate w-full text-center">{entry.studentName}</p>
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">{entry.score} pts</p>
 
                 {/* Pedestal */}
                 <div className={`w-full mt-4 rounded-t-xl bg-gradient-to-b ${cfg.color} opacity-90 p-px shadow-inner`}>
-                  <div className="bg-slate-950/90 rounded-t-xl w-full h-full flex flex-col items-center justify-center py-4 px-2" style={{ minHeight: cfg.rank === 1 ? "100px" : cfg.rank === 2 ? "80px" : "60px" }}>
-                    <span className="text-white text-xs font-bold">{entry.streak} 🔥</span>
+                  <div className="bg-white dark:bg-slate-950/90 rounded-t-xl w-full h-full flex flex-col items-center justify-center py-4 px-2" style={{ minHeight: cfg.rank === 1 ? "100px" : cfg.rank === 2 ? "80px" : "60px" }}>
+                    <span className="text-slate-800 dark:text-white text-xs font-bold">{entry.streak} 🔥</span>
                     <span className="text-[9px] text-slate-500 uppercase tracking-wider mt-1">{entry.testsCompleted} tests</span>
                   </div>
                 </div>
@@ -79,10 +79,10 @@ export default function LeaderboardPage() {
       )}
 
       {/* Remaining list */}
-      <div className="rounded-2xl border border-slate-800/60 bg-slate-900/10 overflow-hidden">
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-white dark:bg-slate-900/10 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-800/60 bg-slate-950/40">
+            <tr className="border-b border-slate-200 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-950/40">
               <th className="text-left px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 w-16">Rank</th>
               <th className="text-left px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Student</th>
               <th className="text-center px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Tests</th>
@@ -90,21 +90,21 @@ export default function LeaderboardPage() {
               <th className="text-right px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">Score</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/30">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/30">
             {remaining.map((entry) => (
-              <tr key={entry.studentName} className="hover:bg-slate-800/10 transition">
-                <td className="px-6 py-4 font-bold text-slate-400">#{entry.rank}</td>
+              <tr key={entry.studentName} className="hover:bg-slate-50 dark:hover:bg-slate-800/10 transition">
+                <td className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400">#{entry.rank}</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300">
+                    <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300">
                       {entry.studentName.charAt(0)}
                     </div>
-                    <span className="font-semibold text-slate-200">{entry.studentName}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">{entry.studentName}</span>
                   </div>
                 </td>
-                <td className="px-6 py-4 text-center text-slate-400">{entry.testsCompleted}</td>
-                <td className="px-6 py-4 text-center text-amber-500 font-medium">{entry.streak} 🔥</td>
-                <td className="px-6 py-4 text-right font-bold text-indigo-400">{entry.score} pts</td>
+                <td className="px-6 py-4 text-center text-slate-500 dark:text-slate-400">{entry.testsCompleted}</td>
+                <td className="px-6 py-4 text-center text-amber-600 dark:text-amber-500 font-medium">{entry.streak} 🔥</td>
+                <td className="px-6 py-4 text-right font-bold text-indigo-600 dark:text-indigo-400">{entry.score} pts</td>
               </tr>
             ))}
           </tbody>

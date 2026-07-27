@@ -3,6 +3,7 @@
 import type {
   ClassSummary, Assignment, PracticeTest, TestResult,
   LeaderboardEntry, FeedbackEntry, AppNotification, User,
+  StudentSubmission,
 } from "@/types/user";
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -146,6 +147,11 @@ export function updateAssignment(id: string, updates: Partial<Assignment>) {
 }
 
 export function getPracticeTests(): PracticeTest[] { return get("tests", seedTests); }
+export function addPracticeTest(t: PracticeTest) {
+  const list = getPracticeTests();
+  list.unshift(t);
+  set("tests", list);
+}
 
 export function getTestResults(): TestResult[] { return get("testResults", []); }
 export function addTestResult(r: TestResult) {
@@ -228,5 +234,49 @@ export function deleteAssignment(id: string) {
 export function deleteTest(id: string) {
   const list = getPracticeTests().filter(t => t.id !== id);
   set("tests", list);
+}
+
+const seedSubmissions: StudentSubmission[] = [
+  {
+    id: "sub_1",
+    assignmentId: "a1",
+    studentName: "Arjun Patel",
+    fileName: "arjun_mechanics_solutions.pdf",
+    comments: "Solved all 15 problems. Question 12 was tricky!",
+    submittedAt: "2026-05-13T14:30:00Z"
+  },
+  {
+    id: "sub_2",
+    assignmentId: "a1",
+    studentName: "Priya Singh",
+    fileName: "priya_newtons_laws.pdf",
+    comments: "Included free body diagrams for all pully problems.",
+    submittedAt: "2026-05-14T09:15:00Z"
+  },
+  {
+    id: "sub_3",
+    assignmentId: "a2",
+    studentName: "Rahul Verma",
+    fileName: "rahul_chemistry_arrow_pushing.pdf",
+    comments: "Hope the SN1/SN2 distinction is clear enough in my mechanism drawings.",
+    submittedAt: "2026-05-13T18:45:00Z"
+  }
+];
+
+export function getSubmissions(): StudentSubmission[] {
+  return get("submissions", seedSubmissions);
+}
+
+export function addSubmission(sub: StudentSubmission) {
+  const list = getSubmissions();
+  list.unshift(sub);
+  set("submissions", list);
+}
+
+export function gradeSubmission(subId: string, grade: string, feedback?: string) {
+  const list = getSubmissions().map((sub) => 
+    sub.id === subId ? { ...sub, grade, feedback } : sub
+  );
+  set("submissions", list);
 }
 
