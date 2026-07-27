@@ -307,7 +307,44 @@ export default function LiveClassPage() {
       }
     };
     window.addEventListener("message", handleWindowMessage);
-    return () => window.removeEventListener("message", handleWindowMessage);
+
+    // [PUSHER] Subscribe to global state updates for cross-device remote control (e.g. phone/laptop -> school PC)
+    const pusherKey = process.env.NEXT_PUBLIC_PUSHER_KEY;
+    let pusherInstance: Pusher | null = null;
+    if (pusherKey) {
+      pusherInstance = new Pusher(pusherKey, {
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "us2",
+      });
+      const pusherChannel = pusherInstance.subscribe("classroom-sync");
+      pusherChannel.bind("state-update", (data: any) => {
+        console.log("%c[Pusher] Received remote control state update:", "color:#ec4899", data);
+        if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
+        if (data.summary !== undefined) setSummary(data.summary);
+        if (data.todos !== undefined) setTodos(data.todos);
+        if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
+        if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
+        if (data.topic !== undefined) setTopic(data.topic);
+        if (data.isListening !== undefined) setIsListening(data.isListening);
+        if (data.calmMode !== undefined) setCalmMode(data.calmMode);
+        if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
+        if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+        
+        // Also relay via BroadcastChannel so other local tabs update too
+        try {
+          const fwd = new BroadcastChannel("lc-state-v2");
+          fwd.postMessage({ type: "sync_state", data });
+          fwd.close();
+        } catch (_) { }
+      });
+    }
+
+    return () => {
+      window.removeEventListener("message", handleWindowMessage);
+      if (pusherInstance) {
+        pusherInstance.unsubscribe("classroom-sync");
+        pusherInstance.disconnect();
+      }
+    };
   }, []);
 
 
