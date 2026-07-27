@@ -7,6 +7,7 @@ import Toolbar from "@/components/whiteboard/Toolbar";
 import WhiteboardCanvas, { WhiteboardCanvasHandle } from "@/components/whiteboard/WhiteboardCanvas";
 import MagicBar from "@/components/whiteboard/MagicBar";
 import type { MagicSettings, Tool } from "@/components/whiteboard/types";
+import { TextbookView } from "@/app/(app)/textbook/page";
 
 // PhET simulation map — 60+ simulations covering physics, chemistry, biology, math
 const SIMS: Record<string, string> = {
@@ -134,8 +135,9 @@ export default function LiveClassPage() {
   const [quiz, setQuiz] = useState<{q: string, options: string[], answer: number} | null>(null);
   const [calmMode, setCalmMode] = useState(false);
   
-  // WHITEBOARD STATE
+  // WHITEBOARD & TEXTBOOK STATE
   const [showWhiteboard, setShowWhiteboard] = useState(false);
+  const [showTextbook, setShowTextbook] = useState(false);
   const whiteboardRef = useRef<WhiteboardCanvasHandle>(null);
   const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState("#000000");
@@ -818,36 +820,38 @@ Use the above textbook excerpts to:
       )}
 
       {/* RIGHT SUMMARY + TODO PANEL */}
-      <div className={`absolute right-6 ${showWhiteboard ? "top-20 -translate-y-0 z-50 scale-95 origin-top-right" : "top-20 -translate-y-0 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
-         {/* Summary */}
-         <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
-            <div className="flex items-center gap-3">
-               <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
-               <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">Summary</span>
+      {!showTextbook && (
+         <div className={`absolute right-6 ${showWhiteboard ? "top-20 -translate-y-0 z-50 scale-95 origin-top-right" : "top-20 -translate-y-0 z-30"} w-72 pointer-events-none flex flex-col gap-4 transition-all duration-700 ease-out`}>
+            {/* Summary */}
+            <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-in flex flex-col gap-3 pointer-events-auto">
+               <div className="flex items-center gap-3">
+                  <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
+                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">Summary</span>
+               </div>
+               <p className="text-xs leading-relaxed text-white/90 font-medium tracking-wide">{summary}</p>
             </div>
-            <p className="text-xs leading-relaxed text-white/90 font-medium tracking-wide">{summary}</p>
-         </div>
 
-         {/* ToDo List (below Summary on the right) */}
-         {!showWhiteboard && (
-            <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-up flex flex-col gap-4 pointer-events-auto">
-               <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">ToDo List</span>
-                  <span className="text-[8px] font-mono text-white/30">{todos.length} Active</span>
+            {/* ToDo List (below Summary on the right) */}
+            {!showWhiteboard && (
+               <div className="p-6 bg-zinc-950/90 backdrop-blur-3xl border border-white/15 rounded-[32px] shadow-2xl animate-fade-up flex flex-col gap-4 pointer-events-auto">
+                  <div className="flex items-center justify-between">
+                     <span className="text-[10px] uppercase tracking-[0.4em] font-black text-white/50">ToDo List</span>
+                     <span className="text-[8px] font-mono text-white/30">{todos.length} Active</span>
+                  </div>
+                  <div className="flex flex-col gap-2.5 max-h-40 overflow-y-auto scrollbar-thin">
+                     {todos.length > 0 ? todos.slice(-4).map((todo, i) => (
+                        <div key={i} className="flex gap-3 items-start animate-fade-in">
+                           <div className="w-1.5 h-1.5 rounded-full border border-indigo-500/50 mt-1.5 shrink-0" />
+                           <p className="text-xs text-white/80 font-medium leading-relaxed">{todo}</p>
+                        </div>
+                     )) : (
+                        <p className="text-[10px] text-white/20 italic">No tasks mentioned yet...</p>
+                     )}
+                  </div>
                </div>
-               <div className="flex flex-col gap-2.5 max-h-40 overflow-y-auto scrollbar-thin">
-                  {todos.length > 0 ? todos.slice(-4).map((todo, i) => (
-                     <div key={i} className="flex gap-3 items-start animate-fade-in">
-                        <div className="w-1.5 h-1.5 rounded-full border border-indigo-500/50 mt-1.5 shrink-0" />
-                        <p className="text-xs text-white/80 font-medium leading-relaxed">{todo}</p>
-                     </div>
-                  )) : (
-                     <p className="text-[10px] text-white/20 italic">No tasks mentioned yet...</p>
-                  )}
-               </div>
-            </div>
-         )}
-      </div>
+            )}
+         </div>
+      )}
 
       {/* Attendance Overlay */}
       <div className={`absolute top-0 inset-x-0 h-auto min-h-[160px] z-50 flex items-center justify-center transition-all duration-1000 ${showAttendance ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}`}>
@@ -1000,6 +1004,30 @@ Use the above textbook excerpts to:
          </div>
       )}
 
+      {/* IN-PLACE TEXTBOOK & PDF VIEWER OVERLAY */}
+      {showTextbook && (
+         <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#0a0a0c] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
+            {/* Top Bar */}
+            <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30">
+               <div className="flex items-center gap-4">
+                  <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">NCERT Textbook & Voice Viewer</span>
+                  <span className="text-xs text-zinc-400 font-medium hidden md:inline">Voice-enabled PDF highlighting & AI assistant</span>
+               </div>
+               <button
+                 onClick={() => setShowTextbook(false)}
+                 className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
+               >
+                 ✕ Close Textbook
+               </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="flex-1 relative overflow-hidden bg-slate-950">
+               <TextbookView isEmbedded={true} />
+            </div>
+         </div>
+      )}
+
       {/* Main Content Area */}
       <div className="flex-1 relative z-10 flex items-center justify-center p-4">
          <div className={`w-full h-full transition-all duration-700 ${isRefreshing ? "opacity-0 scale-95 blur-2xl" : "opacity-100 scale-100 blur-0"}`}>
@@ -1066,10 +1094,25 @@ Use the above textbook excerpts to:
          </div>
       </div>
 
-      {/* Session Toggle & Whiteboard Button */}
+      {/* Session Toggle, Whiteboard & Textbook Buttons */}
       <div className="absolute top-6 right-6 z-50 flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity">
          <button
-           onClick={() => setShowWhiteboard(!showWhiteboard)}
+           onClick={() => {
+             const next = !showTextbook;
+             setShowTextbook(next);
+             if (next) setShowWhiteboard(false);
+           }}
+           className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showTextbook ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
+           title="Toggle NCERT Textbook & PDF Viewer"
+         >
+           📚
+         </button>
+         <button
+           onClick={() => {
+             const next = !showWhiteboard;
+             setShowWhiteboard(next);
+             if (next) setShowTextbook(false);
+           }}
            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border cursor-pointer ${showWhiteboard ? "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_20px_rgba(99,102,241,0.5)] scale-110" : "border-white/10 bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`}
            title="Toggle Drawing Board"
          >
