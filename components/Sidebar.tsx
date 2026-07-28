@@ -32,6 +32,12 @@ const Icon = {
       <rect x="9" y="3" width="6" height="4" rx="1" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="13" y2="16" />
     </svg>
   ),
+  textbook: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  ),
   tests: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
       <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
@@ -111,6 +117,7 @@ const studentLinks = [
   { href: "/ai-tutor",     label: "AI Tutor",     icon: Icon.aiTutor },
   { href: "/simulations",  label: "Simulations",  icon: Icon.simulations },
   { href: "/assignments",  label: "Assignments",  icon: Icon.assignments },
+  { href: "/textbook",     label: "Textbooks",    icon: Icon.textbook },
   { href: "/tests",        label: "Practice Tests", icon: Icon.tests },
   { href: "/leaderboard",  label: "Leaderboard",  icon: Icon.leaderboard },
   { href: "/feedback",     label: "Feedback",     icon: Icon.feedback },
@@ -120,6 +127,7 @@ const teacherLinks = [
   { href: "/dashboard",          label: "Dashboard",    icon: Icon.dashboard },
   { href: "/simulations",        label: "Simulations",  icon: Icon.simulations },
   { href: "/assignments",        label: "Assignments",  icon: Icon.assignments },
+  { href: "/textbook",           label: "Textbooks",    icon: Icon.textbook },
   { href: "/tests",              label: "Tests",        icon: Icon.tests },
   { href: "/live-class/whiteboard", label: "Whiteboard", icon: Icon.whiteboard },
   { href: "/analytics",          label: "Analytics",   icon: Icon.analytics },
@@ -130,6 +138,7 @@ const adminLinks = [
   { href: "/dashboard",          label: "Dashboard",    icon: Icon.dashboard },
   { href: "/simulations",        label: "Simulations",  icon: Icon.simulations },
   { href: "/assignments",        label: "Assignments",  icon: Icon.assignments },
+  { href: "/textbook",           label: "Textbooks",    icon: Icon.textbook },
   { href: "/live-class/whiteboard", label: "Whiteboard", icon: Icon.whiteboard },
   { href: "/analytics",          label: "Analytics",   icon: Icon.analytics },
   { href: "/users",              label: "Users",        icon: Icon.users },
