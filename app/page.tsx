@@ -30,7 +30,7 @@ export default function LoginPage() {
       login(found);
       router.push("/dashboard");
     } else {
-      setError("Invalid name, role, or PIN. Try Mayank/1234 or Admin/8888");
+      setError("Invalid name, role, or PIN. Try Student/0000, Teacher/0000 or Admin/0000");
     }
   };
 
@@ -111,7 +111,7 @@ export default function LoginPage() {
         </button>
 
         <p className="text-[10px] text-slate-600 uppercase tracking-widest">
-          Hint: Mayank (1234) | Prof. Sharma (0000) | Admin (8888)
+          Hint: Student (0000) | Teacher (0000) | Admin (0000)
         </p>
       </div>
     </main>

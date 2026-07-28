@@ -12,21 +12,21 @@ import type {
 
 const seedUsers: User[] = [
   // Students
-  { id: "u1", name: "Mayank", role: "student", pin: "1234" },
+  { id: "u1", name: "Student", role: "student", pin: "0000" },
   { id: "u2", name: "Arjun Patel", role: "student", pin: "1111" },
   { id: "u3", name: "Priya Singh", role: "student", pin: "2222" },
   { id: "u4", name: "Ananya Sharma", role: "student", pin: "3333" },
   { id: "u5", name: "Rahul Verma", role: "student", pin: "4444" },
   
   // Teachers
-  { id: "t1", name: "Prof. Sharma", role: "teacher", pin: "0000" },
+  { id: "t1", name: "Teacher", role: "teacher", pin: "0000" },
   { id: "t2", name: "Dr. Gupta", role: "teacher", pin: "1010" },
   { id: "t3", name: "Prof. Iyer", role: "teacher", pin: "2020" },
   { id: "t4", name: "Ms. Reddy", role: "teacher", pin: "3030" },
   { id: "t5", name: "Dr. Bose", role: "teacher", pin: "4040" },
 
   // Admin
-  { id: "a1", name: "Admin", role: "admin", pin: "8888" },
+  { id: "a1", name: "Admin", role: "admin", pin: "0000" },
 ];
 
 const seedSummaries: ClassSummary[] = [
