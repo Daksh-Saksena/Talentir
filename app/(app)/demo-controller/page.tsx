@@ -87,6 +87,7 @@ export default function DemoControllerPage() {
   const [calmMode, setCalmMode] = useState(false);
   const [showAttendance, setShowAttendance] = useState(false);
   const [attendanceIndex, setAttendanceIndex] = useState(-1);
+  const [imagePace, setImagePace] = useState(10);
 
   // Controller UI states
 
@@ -175,7 +176,8 @@ export default function DemoControllerPage() {
     calmMode,
     showAttendance,
     attendanceIndex,
-    manualMode
+    manualMode,
+    imagePace
   });
 
   useEffect(() => {
@@ -190,7 +192,8 @@ export default function DemoControllerPage() {
       calmMode,
       showAttendance,
       attendanceIndex,
-      manualMode
+      manualMode,
+      imagePace
     };
   });
 
@@ -215,6 +218,7 @@ export default function DemoControllerPage() {
           if (data.calmMode !== undefined) setCalmMode(data.calmMode);
           if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
           if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+          if (data.imagePace !== undefined) setImagePace(data.imagePace);
         }
       }
     };
@@ -236,6 +240,7 @@ export default function DemoControllerPage() {
     if (changes.showAttendance !== undefined) setShowAttendance(changes.showAttendance);
     if (changes.attendanceIndex !== undefined) setAttendanceIndex(changes.attendanceIndex);
     if (changes.manualMode !== undefined) setManualMode(changes.manualMode);
+    if (changes.imagePace !== undefined) setImagePace(changes.imagePace);
 
     // Only push to the classroom iframe if manual override mode is enabled
     if (latestStateRef.current.manualMode || changes.manualMode !== undefined) {
@@ -467,6 +472,25 @@ export default function DemoControllerPage() {
               >
                 ✨ {calmMode ? "Calm Mode ON" : "Calm Mode OFF"}
               </button>
+            </div>
+            
+            {/* Image Pacing Slider */}
+            <div className="mt-4 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-zinc-300">Visual Pacing (seconds)</span>
+                <span className="text-xs text-amber-500 font-black">{imagePace}s</span>
+              </div>
+              <input
+                type="range"
+                min="3"
+                max="60"
+                value={imagePace}
+                onChange={(e) => setImagePace(Number(e.target.value))}
+                onMouseUp={(e) => sync({ imagePace: Number((e.target as HTMLInputElement).value) })}
+                onTouchEnd={(e) => sync({ imagePace: Number((e.target as HTMLInputElement).value) })}
+                className="w-full accent-amber-500"
+              />
+              <p className="text-[10px] text-zinc-500 mt-1">Minimum time a visual stays on screen before the AI can change it.</p>
             </div>
           </div>
 

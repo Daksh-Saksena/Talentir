@@ -213,6 +213,9 @@ export default function LiveClassPage() {
   const recentStylesRef = useRef<string[]>([]);          // last 5 visual types this lesson
   const isFetchingVisualRef = useRef(false);
   const isProcessingSpeechRef = useRef(false);
+  const manualModeRef = useRef(false);
+  const imagePaceRef = useRef(10000); 
+
   // ── Teaching Block Engine ──────────────────────────────────────────────────
   const teachingBlockRef = useRef<{
     name: string;          // e.g. "Depreciation"
@@ -240,6 +243,7 @@ export default function LiveClassPage() {
   // NEW DASHBOARD STATES
   const [topic, setTopic] = useState("Ready to Start");
   const [summary, setSummary] = useState("Listening for lecture points...");
+  const summaryRef = useRef(summary);
   const [todos, setTodos] = useState<string[]>([]);
   const todosRef = useRef<string[]>([]);
   todosRef.current = todos;
@@ -527,6 +531,8 @@ export default function LiveClassPage() {
         if (data.calmMode !== undefined) setCalmMode(data.calmMode);
         if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
         if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+        if (data.manualMode !== undefined) manualModeRef.current = data.manualMode;
+        if (data.imagePace !== undefined) imagePaceRef.current = data.imagePace * 1000;
         
         // Also relay via BroadcastChannel so other local tabs update too
         try {
@@ -564,7 +570,10 @@ export default function LiveClassPage() {
         console.log("%c[Preview iframe] Got lc_state_broadcast, relaying to parent controller", "color:#06b6d4", data.topic);
         // Apply state locally so the iframe renders correctly
         if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
-        if (data.summary !== undefined) setSummary(data.summary);
+        if (data.summary !== undefined) {
+          setSummary(data.summary);
+          summaryRef.current = data.summary;
+        }
         if (data.todos !== undefined) setTodos(data.todos);
         if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
         if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
@@ -617,7 +626,10 @@ export default function LiveClassPage() {
         console.log("%c[Main live-class] Received sync_state from controller override", "color:#10b981", event.data.data);
         const d = event.data.data;
         if (d.activeMedia !== undefined) setActiveMedia(d.activeMedia);
-        if (d.summary !== undefined) setSummary(d.summary);
+        if (d.summary !== undefined) {
+          setSummary(d.summary);
+          summaryRef.current = d.summary;
+        }
         if (d.todos !== undefined) setTodos(d.todos);
         if (d.showWhiteboard !== undefined) setShowWhiteboard(d.showWhiteboard);
         if (d.showTextbook !== undefined) setShowTextbook(d.showTextbook);
@@ -626,6 +638,8 @@ export default function LiveClassPage() {
         if (d.calmMode !== undefined) setCalmMode(d.calmMode);
         if (d.showAttendance !== undefined) setShowAttendance(d.showAttendance);
         if (d.attendanceIndex !== undefined) setAttendanceIndex(d.attendanceIndex);
+        if (d.manualMode !== undefined) manualModeRef.current = d.manualMode;
+        if (d.imagePace !== undefined) imagePaceRef.current = d.imagePace * 1000;
       }
     };
 
@@ -854,7 +868,14 @@ export default function LiveClassPage() {
       return;
     }
 
-    // ── CONCURRENCY & UNSTOPPABLE 10-SECOND HARD LOCK ───────────────────────
+    // ── MANUAL MODE OVERRIDE ────────────────────────────────────────────────
+    if (manualModeRef.current && !isTrigger) {
+      console.log("[Manual Override] Suppressing auto-generation of AI content, keeping transcript context.");
+      setThinking("Manual Override Active");
+      return; // Keeps transcriptBuffer context, but doesn't call OpenAI
+    }
+
+    // ── CONCURRENCY & UNSTOPPABLE PACING HARD LOCK ──────────────────────────────
     // 1. Prevent concurrent speech pipelines (race condition fix)
     if (isProcessingSpeechRef.current || isFetchingVisualRef.current) {
       console.log("[Hard Lock] Pipeline already running — buffering transcript only.");
@@ -862,10 +883,10 @@ export default function LiveClassPage() {
     }
 
     // 2. Absolutely prevent ANY visual or block switching if the current visual
-    // has been displayed for less than 10 seconds (unless manually triggered).
+    // has been displayed for less than the configured pacing time (unless manually triggered).
     const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
-    if (!isTrigger && activeMediaRef.current && timeSinceLastUpdate < 10000) {
-      console.log(`%c[Hard Lock] Visual locked for 10s minimum. (${Math.round(timeSinceLastUpdate / 1000)}s / 10s elapsed)`, 'color: #f59e0b; font-weight: bold;');
+    if (!isTrigger && activeMediaRef.current && timeSinceLastUpdate < imagePaceRef.current) {
+      console.log(`%c[Hard Lock] Visual locked for pacing minimum. (${Math.round(timeSinceLastUpdate / 1000)}s / ${Math.round(imagePaceRef.current / 1000)}s elapsed)`, 'color: #f59e0b; font-weight: bold;');
       setThinking("Active");
       return;
     }
@@ -904,7 +925,7 @@ export default function LiveClassPage() {
       // ── Calculate if we should advance stage or skip AI visual plan ─────────
       const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
       const timeOnScreenSecs = Math.round(timeSinceLastUpdate / 1000);
-      const minDisplayMs = 15000; // 15s minimum per visual
+      const minDisplayMs = imagePaceRef.current; // configurable pacing
       const shouldAdvance = !sameBlock || !activeMediaRef.current || timeSinceLastUpdate >= minDisplayMs || isTrigger;
 
       if (!shouldAdvance && !isFetchingVisualRef.current) {
@@ -954,6 +975,7 @@ Use the above textbook excerpts to:
 3. Stay anchored to this chapter — do not hallucinate concepts not in the excerpts.` : ''}
 
       TRANSCRIPT: "${context}"
+      Current Cumulative Summary: ${summaryRef.current || "None"}
       Current Todo List: ${JSON.stringify(todosRef.current)}.
 
       YOUR TASK: Design a full Visual Plan (not a single search query). Think like an experienced teacher:
@@ -1017,10 +1039,9 @@ Use the above textbook excerpts to:
       - If no new homework was explicitly assigned in this transcript chunk, return the exact existing Current Todo List unchanged!
 
       IMPORTANT — "teaching_intent" RULES (strict):
-      - This field is a TOPIC SUMMARY for students — 1-2 sentences describing the concept being taught.
+      - This field is a running, cumulative SUMMARY of the class for students.
+      - Build upon the Current Cumulative Summary by appending new factual information from the transcript. Make it more comprehensive from the start of the class. Do NOT just replace it with a single sentence!
       - Do NOT mention students, audience, or learning objectives.
-      - Do NOT write "Students are learning..." or "The teacher is explaining..."
-      - Write the concept itself, like a textbook caption: "Depreciation spreads an asset's cost over its useful life using SLM or WDV method."
       - Keep it factual, concise, curriculum-focused.
 
       Reply ONLY valid JSON:
@@ -1086,8 +1107,11 @@ Use the above textbook excerpts to:
       } : null);
 
       // Update topic and teaching intent
-      if (newBlockName) setTopic(newBlockName);
-      if (dec.teaching_intent) setSummary(dec.teaching_intent);
+      if (dec.topic && dec.topic !== topic) setTopic(dec.topic);
+      if (dec.teaching_intent && dec.teaching_intent !== summary) {
+        setSummary(dec.teaching_intent);
+        summaryRef.current = dec.teaching_intent;
+      }
 
       if (dec.homework && Array.isArray(dec.homework)) {
         const hasCancellation = context.toLowerCase().match(/cancel|remove|clear|scratch|delete|forget|no need to/);
