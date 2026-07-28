@@ -888,7 +888,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
               // Fallback: Local Tesseract worker
               const worker = await initWorker();
               if (worker) {
-                const rawResult = await worker.recognize(strokeCanvas);
+                const rawResult = await worker.recognize(strokeCanvas.toDataURL("image/png"));
                 const ocrData = rawResult?.data ?? rawResult;
                 if (typeof ocrData === "string") {
                   recognizedText = ocrData.trim();
