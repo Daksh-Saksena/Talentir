@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import { useAuth } from "@/lib/auth";
-import TextbookVoiceListener, { type VoiceCommand } from "@/components/TextbookVoiceListener";
 import BoardQuestionsPanel from "@/components/BoardQuestionsPanel";
 import {
   findTextbook,
@@ -97,7 +96,6 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
   const [currentSection, setCurrentSection] = useState("");
   const [importantSections, setImportantSections] = useState<ImportantSection[]>([]);
   const [loadingAnnotations, setLoadingAnnotations] = useState(false);
-  const [voiceActive, setVoiceActive] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TextbookEntry[]>([]);
@@ -160,42 +158,7 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
     }
   }, [autoHighlight]);
 
-  // ── Voice command handler ────────────────────────────────────────────────
-  const handleVoiceCommand = useCallback(
-    (cmd: VoiceCommand) => {
-      if (cmd.type === "open_book") {
-        const book = findTextbook(cmd.query);
-        if (book) {
-          // Clamp chapter to valid range for this book
-          let ch: number | null = cmd.chapter ?? null;
-          if (ch !== null && ch !== undefined) {
-            if (!book.hasPdf) {
-              ch = null; // HTML viewer books don't have chapter PDFs
-            } else {
-              ch = Math.max(1, Math.min(ch, book.chapters));
-            }
-          }
-          openBook(book, ch);
-        } else {
-          notify(`❓ No match for "${cmd.query}". Try "Class 10 Science" or "Class 12 Physics".`);
-        }
-      }
-    },
-    [openBook]
-  );
 
-  // ── Voice transcript → section inference ────────────────────────────────
-  const handleTranscript = useCallback(
-    (text: string) => {
-      if (!activeBook) return;
-      if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
-      sectionTimerRef.current = setTimeout(async () => {
-        const sec = await inferSection(text, activeBook);
-        if (sec) setCurrentSection(sec);
-      }, 1500);
-    },
-    [activeBook]
-  );
 
   // ── Search ───────────────────────────────────────────────────────────────
   const handleSearch = (q: string) => {
@@ -235,23 +198,6 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
             <span className="text-lg">📚</span>
             <h2 className="text-sm font-bold text-white">NCERT Textbooks</h2>
           </div>
-
-          <TextbookVoiceListener
-            onCommand={handleVoiceCommand}
-            onTranscript={handleTranscript}
-            active={voiceActive}
-          />
-
-          <button
-            onClick={() => setVoiceActive((v) => !v)}
-            className={`w-full py-2 rounded-2xl text-xs font-semibold transition border ${
-              voiceActive
-                ? "bg-green-500/10 border-green-500/30 text-green-400"
-                : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
-            }`}
-          >
-            {voiceActive ? "🎙️ Voice Active — click to stop" : "🎙️ Enable Voice Commands"}
-          </button>
 
           {/* Search box */}
           <div className="relative">
@@ -434,7 +380,7 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
 
         {/* PDF content area */}
         {!activeBook ? (
-          <EmptyState onVoice={() => setVoiceActive(true)} />
+          <EmptyState />
         ) : activeBook.hasPdf ? (
           /* Classes 9–12: render with PDFViewer for highlights */
           pdfFailed ? (
@@ -549,7 +495,7 @@ function GradeAccordion({
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
-function EmptyState({ onVoice }: { onVoice: () => void }) {
+function EmptyState() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
       <div className="w-24 h-24 rounded-[32px] bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-5xl">
@@ -558,24 +504,9 @@ function EmptyState({ onVoice }: { onVoice: () => void }) {
       <div>
         <h3 className="text-xl font-bold text-white mb-2">Open a Textbook</h3>
         <p className="text-sm text-slate-400 max-w-xs leading-relaxed">
-          Pick a class from the left sidebar, use the search bar, or try voice commands.
+          Pick a class from the left sidebar or use the search bar.
         </p>
       </div>
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl px-6 py-4 text-left max-w-sm w-full space-y-2">
-        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Voice examples:</p>
-        {["Open Class 12 Physics Chapter 3", "Show Class 10 Science Chapter 5", "Pull up Class 9 Maths", "Load Class 6 English"].map((ex) => (
-          <p key={ex} className="text-sm text-slate-300 flex items-center gap-2">
-            <span className="text-indigo-400 text-base">🎙</span>
-            <span>"{ex}"</span>
-          </p>
-        ))}
-      </div>
-      <button
-        onClick={onVoice}
-        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-2xl transition shadow-lg shadow-indigo-500/20"
-      >
-        🎙️ Enable Voice Commands
-      </button>
     </div>
   );
 }

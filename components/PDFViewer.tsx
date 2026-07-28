@@ -171,7 +171,11 @@ function PDFPage({
         if (cancelled || !layerRef.current) return;
         layerRef.current.style.width  = `${viewport.width}px`;
         layerRef.current.style.height = `${viewport.height}px`;
-        const lk = keywordsRef.current.map((k) => k.toLowerCase().trim()).filter(Boolean);
+        const lk = keywordsRef.current
+          .map((k) => k.toLowerCase().trim())
+          .filter(Boolean)
+          .flatMap((k) => k.split(/[\s-]+/))
+          .filter((w) => w.length >= 3);
         buildTextLayer(layerRef.current, content.items, viewport, lk);
       } catch (_) { /* text extraction failed — highlights just won't show */ }
     }).catch(() => {});
@@ -186,7 +190,11 @@ function PDFPage({
     if (!renderedRef.current || !layerRef.current) return;
 
     const viewport = page.getViewport({ scale: SCALE });
-    const lk = highlightKeywords.map((k) => k.toLowerCase().trim()).filter(Boolean);
+    const lk = highlightKeywords
+      .map((k) => k.toLowerCase().trim())
+      .filter(Boolean)
+      .flatMap((k) => k.split(/[\s-]+/))
+      .filter((w) => w.length >= 3);
 
     page.getTextContent().then((content) => {
       if (!layerRef.current) return;
