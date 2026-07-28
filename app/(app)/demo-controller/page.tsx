@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
+import Pusher from "pusher-js";
 
 interface PresetItem {
   name: string;
@@ -200,31 +201,64 @@ export default function DemoControllerPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // Listen for state updates sent UP from the live-class iframe via window.parent.postMessage.
-    // This works cross-origin (port 8000 -> port 4500) unlike BroadcastChannel which is same-origin only.
-    const handleMessage = (event: MessageEvent) => {
-      const { type, data } = event.data || {};
-      if (type === "classroom_state_update" && data) {
-        console.log("%c[Controller] Got classroom_state_update from iframe relay. manualMode:", "color:#f59e0b", latestStateRef.current.manualMode, "topic:", data.topic);
-        // Only mirror when NOT in manual override mode
-        if (!latestStateRef.current.manualMode) {
-          if (data.topic !== undefined) setTopic(data.topic);
-          if (data.summary !== undefined) setSummary(data.summary);
-          if (data.todos !== undefined) setTodos(data.todos);
-          if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
-          if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
-          if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
-          if (data.isListening !== undefined) setIsListening(data.isListening);
-          if (data.calmMode !== undefined) setCalmMode(data.calmMode);
-          if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
-          if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
-          if (data.imagePace !== undefined) setImagePace(data.imagePace);
-        }
+    const applyRemoteData = (data: any) => {
+      if (!latestStateRef.current.manualMode && data) {
+        if (data.topic !== undefined) setTopic(data.topic);
+        if (data.summary !== undefined) setSummary(data.summary);
+        if (data.todos !== undefined) setTodos(data.todos);
+        if (data.activeMedia !== undefined) setActiveMedia(data.activeMedia);
+        if (data.showWhiteboard !== undefined) setShowWhiteboard(data.showWhiteboard);
+        if (data.showTextbook !== undefined) setShowTextbook(data.showTextbook);
+        if (data.isListening !== undefined) setIsListening(data.isListening);
+        if (data.calmMode !== undefined) setCalmMode(data.calmMode);
+        if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
+        if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
+        if (data.imagePace !== undefined) setImagePace(data.imagePace);
       }
     };
 
+    // 1. Listen for state updates sent UP from the live-class iframe via window.parent.postMessage
+    const handleMessage = (event: MessageEvent) => {
+      const { type, data } = event.data || {};
+      if (type === "classroom_state_update" && data) {
+        applyRemoteData(data);
+      }
+    };
     window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+
+    // 2. Listen via BroadcastChannel for same-origin tabs (e.g. live-class in another tab on Vercel)
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("lc-state-v2");
+      channel.addEventListener("message", (event: MessageEvent) => {
+        if (event.data?.type === "lc_state_broadcast" && event.data?.data) {
+          applyRemoteData(event.data.data);
+        }
+      });
+      channel.postMessage({ type: "lc_request_state" });
+    } catch (_) {}
+
+    // 3. Listen via Pusher for cross-device / remote sync
+    const pusherKey = process.env.NEXT_PUBLIC_PUSHER_KEY;
+    let pusherInstance: Pusher | null = null;
+    if (pusherKey) {
+      pusherInstance = new Pusher(pusherKey, {
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "us2",
+      });
+      const pusherChannel = pusherInstance.subscribe("classroom-sync");
+      pusherChannel.bind("state-update", (data: any) => {
+        applyRemoteData(data);
+      });
+    }
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      if (channel) channel.close();
+      if (pusherInstance) {
+        pusherInstance.unsubscribe("classroom-sync");
+        pusherInstance.disconnect();
+      }
+    };
   }, []);
 
   const sync = (changes: any) => {
@@ -348,7 +382,7 @@ export default function DemoControllerPage() {
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
             <h2 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-400">Classroom Live Preview (70% Scale)</h2>
           </div>
-          <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700">PORT 8000 Proxy View</span>
+          <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700">Live Sync Active</span>
         </div>
 
         {/* Scaled Iframe Wrapper */}
