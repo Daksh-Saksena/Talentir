@@ -435,6 +435,29 @@ export default function DemoControllerPage() {
               {manualMode ? "ACTIVE (ON)" : "INACTIVE (OFF)"}
             </button>
           </div>
+
+          {/* Always-visible Live Transcript Box */}
+          <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                📜 Live Class Transcript
+              </span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(fullTranscript || summary);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="text-[10px] font-bold px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition cursor-pointer"
+              >
+                {copied ? "Copied!" : "📋 Copy All"}
+              </button>
+            </div>
+            <div className="max-h-40 overflow-y-auto bg-black/60 p-2.5 rounded-lg border border-zinc-800/80 text-[11px] text-zinc-200 leading-relaxed font-mono whitespace-pre-wrap">
+              {fullTranscript || summary || "Listening for class audio..."}
+            </div>
+          </div>
         </div>
 
         <div className="p-6">
@@ -528,26 +551,6 @@ export default function DemoControllerPage() {
                 className="w-full accent-amber-500"
               />
               <p className="text-[10px] text-zinc-500 mt-1">Minimum time a visual stays on screen before the AI can change it.</p>
-            </div>
-
-            {/* Live Transcript View & Copy */}
-            <div className="mt-4 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-cyan-400">📜 Live Class Transcript</span>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(fullTranscript || summary);
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
-                  }}
-                  className="text-[10px] font-bold px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded transition"
-                >
-                  {copied ? "Copied!" : "📋 Copy All"}
-                </button>
-              </div>
-              <div className="max-h-36 overflow-y-auto bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 text-[11px] text-zinc-300 leading-relaxed font-mono whitespace-pre-wrap">
-                {fullTranscript || summary || "Listening for class audio..."}
-              </div>
             </div>
           </div>
 
