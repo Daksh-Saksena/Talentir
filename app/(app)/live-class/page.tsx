@@ -431,7 +431,9 @@ export default function LiveClassPage() {
     { name: "Ishaan", status: "pending" }, { name: "Kavya", status: "pending" }
   ]);
 
-  const transcriptBuffer = useRef<string[]>([]);
+  const transcriptBuffer = useRef<string[]>([]);  // rolling 8-chunk context window
+  const fullTranscriptRef = useRef<string[]>([]);   // full session transcript (all chunks)
+  const sessionIdRef = useRef<string>("");          // unique id for this session
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -820,6 +822,21 @@ export default function LiveClassPage() {
       studentStatsRef.current = {};
       setIsListening(false); stopEngines(); if (document.fullscreenElement) document.exitFullscreen();
       setLiveTranscript([]);
+      // ── Save full transcript to localStorage on stop ──────────────────
+      if (fullTranscriptRef.current.length > 0) {
+        const sessions = JSON.parse(localStorage.getItem('cc-transcripts') || '[]');
+        sessions.unshift({
+          id: sessionIdRef.current,
+          date: new Date().toISOString(),
+          topic: topic,
+          text: fullTranscriptRef.current.join(' '),
+          chunks: [...fullTranscriptRef.current],
+        });
+        // Keep last 30 sessions
+        if (sessions.length > 30) sessions.pop();
+        localStorage.setItem('cc-transcripts', JSON.stringify(sessions));
+        console.log('%c[Talentir] Full transcript saved to localStorage (cc-transcripts)', 'color:#6366f1;', `${fullTranscriptRef.current.length} chunks`);
+      }
     } else {
       if (!apiKey) return;
       const elem = document.documentElement as any;
@@ -827,6 +844,9 @@ export default function LiveClassPage() {
       sessionStartRef.current = Date.now();
       studentStatsRef.current = {};
       resetImageHistory();
+      // ── Start a fresh transcript session ───────────────────────────
+      sessionIdRef.current = `ts_${Date.now()}`;
+      fullTranscriptRef.current = [];
       setIsListening(true); startDeepgram();
       setLiveTranscript([]);
       // ── Initialize Lesson RAG in the background ──────────────────────────────
@@ -856,8 +876,20 @@ export default function LiveClassPage() {
   const handleHeardSpeech = async (text: string) => {
     const isTrigger = text === "MANUAL_SYNC_TRIGGER";
     if (!isTrigger) {
+      // Append to rolling context window
       transcriptBuffer.current.push(text);
       if (transcriptBuffer.current.length > 8) transcriptBuffer.current.shift();
+      // Append to full session transcript and save to localStorage
+      fullTranscriptRef.current.push(text);
+      console.log('%c[Transcript]', 'color:#06b6d4; font-weight:bold;', text);
+      // Periodically persist (every 10 chunks) so nothing is lost on crash
+      if (fullTranscriptRef.current.length % 10 === 0) {
+        const sessions = JSON.parse(localStorage.getItem('cc-transcripts') || '[]');
+        const existing = sessions.findIndex((s: any) => s.id === sessionIdRef.current);
+        const entry = { id: sessionIdRef.current, date: new Date().toISOString(), topic, text: fullTranscriptRef.current.join(' '), chunks: [...fullTranscriptRef.current] };
+        if (existing >= 0) sessions[existing] = entry; else sessions.unshift(entry);
+        localStorage.setItem('cc-transcripts', JSON.stringify(sessions));
+      }
       setCountdown(30);
     }
 
@@ -1147,20 +1179,24 @@ Use the above textbook excerpts to:
               setIsRefreshing(false);
             }, 600);
           } else if (dec.type === "image") {
-            // ── Priority 1: Search local image library ───────────────────────
+            // ── Priority 1: Search local image library (high threshold only) ─
             const primaryQuery = dec.primary_visual?.query || "";
-            const combinedQuery = `${primaryQuery} ${dec.teaching_intent || ""}`.trim();
+            // Use only the primary query for local matching — not the long cumulative summary
             const currentFilename = activeMediaRef.current?.key?.startsWith("/pics/")
               ? activeMediaRef.current.key.replace("/pics/", "")
               : null;
 
-            const localResult = searchLocalLibrary(combinedQuery, currentFilename);
+            const localResult = searchLocalLibrary(primaryQuery, currentFilename);
+
+            // Raised threshold to 0.55 to avoid generic accounting images dominating.
+            // Even above threshold, coin-flip 50% to prefer Google Images for variety.
+            const useLocal = localResult && localResult.score >= 0.55 && Math.random() < 0.5;
 
             let finalUrl: string;
             let isLocalImage = false;
 
-            if (localResult && localResult.score >= 0.25) {
-              console.log("%c[Local Library] Hit! score=", "color:#22c55e", localResult.score.toFixed(3), localResult.image.filename, "query:", combinedQuery);
+            if (useLocal && localResult) {
+              console.log("%c[Local Library] Hit! score=", "color:#22c55e", localResult.score.toFixed(3), localResult.image.filename, "query:", primaryQuery);
               finalUrl = localResult.image.url;
               isLocalImage = true;
             } else {
