@@ -89,6 +89,8 @@ export default function DemoControllerPage() {
   const [showAttendance, setShowAttendance] = useState(false);
   const [attendanceIndex, setAttendanceIndex] = useState(-1);
   const [imagePace, setImagePace] = useState(10);
+  const [fullTranscript, setFullTranscript] = useState("");
+  const [copied, setCopied] = useState(false);
 
   // Controller UI states
 
@@ -214,6 +216,7 @@ export default function DemoControllerPage() {
         if (data.showAttendance !== undefined) setShowAttendance(data.showAttendance);
         if (data.attendanceIndex !== undefined) setAttendanceIndex(data.attendanceIndex);
         if (data.imagePace !== undefined) setImagePace(data.imagePace);
+        if (data.fullTranscript !== undefined) setFullTranscript(data.fullTranscript);
       }
     };
 
@@ -525,6 +528,26 @@ export default function DemoControllerPage() {
                 className="w-full accent-amber-500"
               />
               <p className="text-[10px] text-zinc-500 mt-1">Minimum time a visual stays on screen before the AI can change it.</p>
+            </div>
+
+            {/* Live Transcript View & Copy */}
+            <div className="mt-4 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-cyan-400">📜 Live Class Transcript</span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(fullTranscript || summary);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="text-[10px] font-bold px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded transition"
+                >
+                  {copied ? "Copied!" : "📋 Copy All"}
+                </button>
+              </div>
+              <div className="max-h-36 overflow-y-auto bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 text-[11px] text-zinc-300 leading-relaxed font-mono whitespace-pre-wrap">
+                {fullTranscript || summary || "Listening for class audio..."}
+              </div>
             </div>
           </div>
 

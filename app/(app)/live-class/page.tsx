@@ -587,7 +587,7 @@ export default function LiveClassPage() {
 
         // Relay to parent controller window
         try {
-          window.parent.postMessage({ type: "classroom_state_update", data }, "*");
+          window.parent.postMessage({ type: "classroom_state_update", data: { ...data, fullTranscript: fullTranscriptRef.current.join(' ') } }, "*");
         } catch (_) { }
       }
     };
@@ -675,7 +675,8 @@ export default function LiveClassPage() {
         isListening,
         calmMode,
         showAttendance,
-        attendanceIndex
+        attendanceIndex,
+        fullTranscript: fullTranscriptRef.current.join(' ')
       }
     });
 
@@ -881,6 +882,8 @@ export default function LiveClassPage() {
       if (transcriptBuffer.current.length > 8) transcriptBuffer.current.shift();
       // Append to full session transcript and save to localStorage immediately
       fullTranscriptRef.current.push(text);
+      (window as any).__fullTranscript = fullTranscriptRef.current;
+      (window as any).__getTranscriptText = () => fullTranscriptRef.current.join(' ');
       console.log('%c[Transcript]', 'color:#06b6d4; font-weight:bold;', text);
       
       try {
