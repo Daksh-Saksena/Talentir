@@ -74,6 +74,7 @@ function findRoots(f: (x: number) => number, lo = -30, hi = 30, steps = 800): nu
 
 type ParsedEq =
   | { kind: "fn";        fn: (x: number) => number; label: string; rootHint?: number[] }
+  | { kind: "fn_y";      fn: (y: number) => number; label: string }
   | { kind: "verticals"; xs: number[];               label: string }
   | { kind: "circle";    cx: number; cy: number; r: number; label: string }
   | { kind: "none";      label: string };
@@ -105,6 +106,16 @@ function parseEquation(raw: string): ParsedEq {
     // Reverse: f(x) = y
     if (rhs === "y") {
       return { kind: "fn", fn: safeFn(toJS(lhs)), label };
+    }
+
+    // ── Reverse Explicit: x = f(y) ─────────────────────────────────────────
+    if (lhs === "x") {
+      const jsExpr = toJS(rhs.replace(/\by\b/g, "x"));
+      return { kind: "fn_y", fn: safeFn(jsExpr), label };
+    }
+    if (rhs === "x") {
+      const jsExpr = toJS(lhs.replace(/\by\b/g, "x"));
+      return { kind: "fn_y", fn: safeFn(jsExpr), label };
     }
 
     // ── No y in the equation → constraint on x → vertical lines ───────────
@@ -179,6 +190,37 @@ export default function GraphPlotter({ equation, onClose }: GraphPlotterProps) {
 
   // ── Function path segments ─────────────────────────────────────────────────
   const pathSegments = useMemo(() => {
+    if (parsed.kind === "fn_y") {
+      const segments: string[][] = [];
+      let current: string[] = [];
+      const steps = 600;
+      const step = (range * 2) / steps;
+
+      let prevX: number | null = null;
+      for (let i = 0; i <= steps; i++) {
+        const yi = -range + i * step;
+        const x = parsed.fn(yi);
+        const svgX = cx + x * scale;
+        const svgY = cy - yi * scale;
+
+        const disc = prevX !== null && Math.abs(x - prevX) > range * 5;
+        if (isNaN(x) || !isFinite(x) || disc) {
+          if (current.length > 1) segments.push(current);
+          current = [];
+          prevX = null;
+          continue;
+        }
+        current.push(
+          current.length === 0
+            ? `M ${svgX.toFixed(2)} ${svgY.toFixed(2)}`
+            : `L ${svgX.toFixed(2)} ${svgY.toFixed(2)}`
+        );
+        prevX = x;
+      }
+      if (current.length > 1) segments.push(current);
+      return segments;
+    }
+
     if (parsed.kind !== "fn") return [];
     const segments: string[][] = [];
     let current: string[] = [];

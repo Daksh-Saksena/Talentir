@@ -83,6 +83,120 @@ const ACCOUNTING_FORMULAS: Record<string, { label: string; formula: string; note
   'capital': { label: 'Capital Formula', formula: 'Capital = Assets \u2212 Liabilities', note: "Owner's equity or proprietor's fund" },
 };
 
+function formatInline(str: string) {
+  const parts = str.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return (
+        <strong key={i} className="font-bold text-white">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+      return (
+        <em key={i} className="italic text-indigo-200">
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code key={i} className="bg-white/10 px-1 py-0.5 rounded text-[10px] font-mono text-cyan-300">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
+}
+
+function parseFormattedText(text: string) {
+  if (!text) return null;
+
+  // Clean LaTeX TeX math syntax into readable math
+  let cleaned = text
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)")
+    .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
+    .replace(/\\cdot|\\times/g, "×")
+    .replace(/\\div/g, "÷")
+    .replace(/\\pm/g, "±")
+    .replace(/\\leq/g, "≤")
+    .replace(/\\geq/g, "≥")
+    .replace(/\\neq/g, "≠")
+    .replace(/\\approx/g, "≈")
+    .replace(/\\alpha/g, "α")
+    .replace(/\\beta/g, "β")
+    .replace(/\\theta/g, "θ")
+    .replace(/\\pi/g, "π")
+    .replace(/\\sigma/g, "σ")
+    .replace(/\\delta/g, "δ")
+    .replace(/\\lambda/g, "λ")
+    .replace(/\\\(/g, "")
+    .replace(/\\\)/g, "")
+    .replace(/\\\[/g, "")
+    .replace(/\\\]/g, "")
+    .replace(/\$\$/g, "")
+    .replace(/\$/g, "");
+
+  const lines = cleaned.split("\n");
+
+  return lines.map((line, lineIdx) => {
+    const trimmed = line.trim();
+    if (!trimmed) return <div key={lineIdx} className="h-1" />;
+
+    if (/^#{1,4}\s+/.test(trimmed)) {
+      const headerText = trimmed.replace(/^#{1,4}\s+/, "");
+      return (
+        <h4 key={lineIdx} className="text-[12px] font-bold text-indigo-300 mt-2 mb-1 tracking-wide">
+          {formatInline(headerText)}
+        </h4>
+      );
+    }
+
+    if (/^[-*•]\s+/.test(trimmed)) {
+      const bulletText = trimmed.replace(/^[-*•]\s+/, "");
+      return (
+        <div key={lineIdx} className="flex gap-2 items-start my-0.5 text-[11px] text-white/90 leading-relaxed">
+          <span className="text-indigo-400 font-bold mt-0.5 shrink-0">•</span>
+          <div>{formatInline(bulletText)}</div>
+        </div>
+      );
+    }
+
+    return (
+      <p key={lineIdx} className="text-[11px] text-white/85 leading-relaxed my-0.5">
+        {formatInline(trimmed)}
+      </p>
+    );
+  });
+}
+
+function sanitizeEquationForPlot(raw: string): string | null {
+  if (!raw) return null;
+  // Strip leading list numbers, prefixes, quotes, and punctuation
+  let cleaned = raw.replace(/^(PLOT:|\d+[\.\)]|[a-z][\.\)]|[-*•]|["'`])\s*/gi, "").replace(/["'`]$/, "").trim();
+
+  // Reject prose, English sentences, or multiple comma-separated statements (e.g., "When y = 1, x = -1")
+  if (/\b(when|where|then|if|is|the|for|and|or|equals|value|point|solution|case|note)\b/i.test(cleaned)) {
+    return null;
+  }
+  if (cleaned.includes(",")) return null;
+
+  // Must contain valid math symbols or variables
+  if (!/[x0-9^+\-*/()]/i.test(cleaned)) return null;
+
+  // Convert f(x) = to y =
+  cleaned = cleaned.replace(/^f\(x\)\s*=\s*/i, "y = ");
+
+  // If there's no '=', prepend y =
+  if (!cleaned.includes("=")) {
+    cleaned = `y = ${cleaned}`;
+  }
+
+  return cleaned;
+}
+
 interface Student {
   name: string; status: "present" | "absent" | "pending";
 }
@@ -145,14 +259,6 @@ export default function LiveClassPage() {
   const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState("#000000");
   const [penSize, setPenSize] = useState(3);
-  const [magicSettings, setMagicSettings] = useState<MagicSettings>({
-    ocr: true,
-    beautify: true,
-    smartSuggestions: true,
-    equationDetection: true,
-    chemistryDetection: true,
-    shapeDetection: true,
-  });
   const [detectedEquations, setDetectedEquations] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -162,14 +268,107 @@ export default function LiveClassPage() {
       return [eq, ...prev.slice(0, 4)];
     });
   };
-  const [suggestions, setSuggestions] = useState([
-    "Turn this into a neat study summary",
-    "Extract the key equations",
-    "Convert this into a labeled diagram",
-    "Highlight the important concepts",
+  const [suggestions] = useState([
+    "📈 Plot Graph for Equation",
+    "Extract all key equations",
+    "Summarise the last few minutes",
+    "Generate 3 quiz questions",
+    "List important concepts taught so far",
+    "Explain this concept simply",
   ]);
   const [assistTool, setAssistTool] = useState("none");
   const [magicOpen, setMagicOpen] = useState(false);
+  const [magicInput, setMagicInput] = useState("");
+  const [magicResponse, setMagicResponse] = useState<string | null>(null);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicSettings, setMagicSettings] = useState<MagicSettings>({
+    ocr: true,
+    beautify: true,
+    smartSuggestions: true,
+    equationDetection: true,
+    chemistryDetection: true,
+    shapeDetection: true,
+  });
+
+  const runMagicAI = async (prompt: string) => {
+    if (!apiKey || !prompt.trim()) return;
+    setMagicLoading(true);
+    setMagicResponse(null);
+    try {
+      const context = transcriptBuffer.current.join(" ");
+      const boardImageDataUrl = whiteboardRef.current?.getCanvasDataURL?.();
+
+      const userMessageContent: any[] = [
+        {
+          type: "text",
+          text: `Lesson speech context: "${context || "No audio transcript recorded yet"}"\n\nTeacher Question / Task: ${prompt}`,
+        },
+      ];
+
+      if (boardImageDataUrl) {
+        console.log("%c[Magic AI Request] Sending whiteboard snapshot image to OpenAI Vision API! Size:", "color: #10b981; font-weight: bold;", `${Math.round(boardImageDataUrl.length / 1024)} KB`);
+        userMessageContent.push({
+          type: "image_url",
+          image_url: {
+            url: boardImageDataUrl,
+            detail: "high",
+          },
+        });
+      } else {
+        console.warn("[Magic AI Request] No whiteboard image available, sending text context only.");
+      }
+
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an expert AI teaching assistant looking directly at the teacher's live whiteboard drawing/writing and speech transcript. Analyze any diagrams, equations, notes, or shapes drawn on the board in combination with the question. Keep answers clear, well-structured, concise, and helpful. FORMATTING RULES: Do NOT output raw LaTeX slash commands like \\frac, \\text, \\begin. Use clean plain Unicode math characters like x², √x, a ÷ b, θ, π, ±. GRAPHING RULE: If an equation is found or if asked to plot a graph, include the exact equation line at the end of your text as 'PLOT: <equation>' (e.g., PLOT: y = x^2 - 4 or PLOT: y = 2x + 3 or PLOT: y = sin(x)). Max 180 words.",
+            },
+            { role: "user", content: userMessageContent },
+          ],
+          max_tokens: 400,
+        }),
+      });
+      const d = await r.json();
+      const responseText = d.choices?.[0]?.message?.content || "No response received from AI.";
+
+      const plotMatch = responseText.match(/PLOT:\s*([^\n\r]+)/i);
+      let targetEq: string | null = null;
+
+      if (plotMatch && plotMatch[1]) {
+        targetEq = sanitizeEquationForPlot(plotMatch[1]);
+      }
+
+      if (!targetEq && (prompt.toLowerCase().includes("graph") || prompt.toLowerCase().includes("plot") || prompt.toLowerCase().includes("equation"))) {
+        const candidateMatches = responseText.match(/\b(y\s*=\s*[x0-9^+\-*/().\s]+|f\(x\)\s*=\s*[x0-9^+\-*/().\s]+)\b/gi);
+        if (candidateMatches) {
+          for (const cand of candidateMatches) {
+            const sanitized = sanitizeEquationForPlot(cand);
+            if (sanitized) {
+              targetEq = sanitized;
+              break;
+            }
+          }
+        }
+      }
+
+      if (targetEq) {
+        console.log("%c[Magic AI Graph] Valid equation recognized and sent to GraphPlotter:", "color: #10b981; font-weight: bold;", targetEq);
+        handleEquationDetected(targetEq);
+      }
+
+      const cleanResponse = responseText.replace(/PLOT:\s*[^\n\r]+/gi, "").trim();
+      setMagicResponse(cleanResponse || responseText);
+    } catch (e) {
+      setMagicResponse("Error calling AI vision model. Check your API key.");
+    }
+    setMagicLoading(false);
+  };
 
   // ATTENTION & PARTICIPATION
   const [attention, setAttention] = useState(0);
@@ -817,10 +1016,17 @@ Use the above textbook excerpts to:
       - ONLY add an item if the teacher EXPLICITLY assigns homework or tasks to students in the TRANSCRIPT (e.g., "do question 5 for homework", "solve illustration 3 at home").
       - If no new homework was explicitly assigned in this transcript chunk, return the exact existing Current Todo List unchanged!
 
+      IMPORTANT — "teaching_intent" RULES (strict):
+      - This field is a TOPIC SUMMARY for students — 1-2 sentences describing the concept being taught.
+      - Do NOT mention students, audience, or learning objectives.
+      - Do NOT write "Students are learning..." or "The teacher is explaining..."
+      - Write the concept itself, like a textbook caption: "Depreciation spreads an asset's cost over its useful life using SLM or WDV method."
+      - Keep it factual, concise, curriculum-focused.
+
       Reply ONLY valid JSON:
       {
         "block_name": "the current teaching block name",
-        "teaching_intent": "what student should understand in one sentence",
+        "teaching_intent": "1-2 sentence factual summary of the concept being taught",
         "homework": ["string"],
         "type": "image"|"formula"|"none"|"keep_current",
         "primary_visual": { "type": "style string", "query": "search query" },
@@ -1177,68 +1383,77 @@ Use the above textbook excerpts to:
 
       {/* IN-PLACE DRAWING BOARD OVERLAY */}
       {showWhiteboard && (
-        <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#171717] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
+        <div className="absolute inset-4 z-[100] rounded-[40px] overflow-hidden bg-[#171717] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
           {/* Top Bar */}
-          <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30 pl-[340px]">
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">Drawing Board</span>
+          <div className="flex items-center justify-between px-6 py-3 border-b border-white/10 bg-zinc-950/95 backdrop-blur z-30">
+            {/* Left: all drawing tools in one row */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Drawing Tools */}
+              {([
+                { value: 'pen', icon: '✏️', label: 'Pen' },
+                { value: 'eraser', icon: '🧽', label: 'Eraser' },
+                { value: 'highlighter', icon: '🖍️', label: 'Highlight' },
+                { value: 'laser', icon: '📍', label: 'Laser' },
+                { value: 'pan', icon: '✋', label: 'Pan' },
+              ] as { value: Tool; icon: string; label: string }[]).map(t => (
+                <button key={t.value} title={t.label} onClick={() => setTool(t.value)}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm transition-all ${
+                    tool === t.value ? 'bg-indigo-600 text-white shadow-md scale-105' : 'bg-white/5 hover:bg-white/10 text-white/80'
+                  }`}>{t.icon}</button>
+              ))}
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              {/* Shape Tools */}
+              {([
+                { value: 'line', icon: '╱' },
+                { value: 'rectangle', icon: '▭' },
+                { value: 'circle', icon: '◯' },
+                { value: 'arrow', icon: '↗' },
+              ] as { value: Tool; icon: string }[]).map(t => (
+                <button key={t.value} title={t.value} onClick={() => setTool(t.value)}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold transition-all ${
+                    tool === t.value ? 'bg-indigo-600 text-white shadow-md scale-105' : 'bg-white/5 hover:bg-white/10 text-zinc-200'
+                  }`}>{t.icon}</button>
+              ))}
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              {/* Colors */}
+              {['#000000','#2563eb','#ef4444','#16a34a','#eab308','#ffffff'].map(c => (
+                <button key={c} onClick={() => setColor(c)}
+                  className={`w-6 h-6 rounded-full border-2 transition-all ${
+                    color === c ? 'border-white scale-110 shadow-md' : 'border-white/20'
+                  }`} style={{ background: c }} />
+              ))}
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              {/* Size */}
+              <input type="range" min={1} max={20} value={penSize} onChange={e => setPenSize(Number(e.target.value))}
+                className="w-20 h-1 accent-indigo-500" />
+              <span className="text-[10px] text-white/40 font-mono w-6">{penSize}px</span>
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              {/* Actions */}
+              <button onClick={() => whiteboardRef.current?.undo()} title="Undo" className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-white/80 text-sm">↩</button>
+              <button onClick={() => whiteboardRef.current?.redo()} title="Redo" className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-white/80 text-sm">↪</button>
+              <button onClick={() => whiteboardRef.current?.clear()} title="Clear" className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm">🗑</button>
+              <button onClick={() => whiteboardRef.current?.exportPNG()} title="Export" className="w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-sm">💾</button>
+              <div className="w-px h-6 bg-white/10 mx-1" />
               <button
-                onClick={() => setSidebarOpen((v) => !v)}
-                className="flex items-center gap-1.5 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-95 cursor-pointer"
-              >
-                <span>⚙️</span>
-                <span>Features</span>
-              </button>
-              <button
-                onClick={() => setMagicOpen((value) => !value)}
-                className="rounded-full bg-blue-600/20 px-4 py-1 text-xs font-semibold text-blue-200 transition hover:bg-blue-600/30 border border-blue-500/30 cursor-pointer"
+                onClick={() => setMagicOpen(v => !v)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition border cursor-pointer ${
+                  magicOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-blue-600/20 border-blue-500/30 text-blue-200 hover:bg-blue-600/30'
+                }`}
               >
                 ✨ Magic AI
               </button>
-              <span className="text-xs text-zinc-400 font-medium hidden md:inline">Draw diagrams, write equations, or summarize concepts</span>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 rounded-full bg-zinc-900/90 px-4 py-1.5 text-xs text-zinc-200 border border-white/10">
-                <span className="font-bold uppercase tracking-wider text-indigo-400">
-                  {tool === "eraser" ? "Eraser" : tool === "highlighter" ? "Highlighter" : tool === "pan" ? "Pan" : tool === "laser" ? "Laser" : "Pen"}
-                </span>
-                <span className="text-zinc-600">•</span>
-                <div className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: color }} />
-                <span className="text-zinc-600">•</span>
-                <span>{penSize}px</span>
-              </div>
-              <button
-                onClick={() => setShowWhiteboard(false)}
-                className="rounded-full bg-red-500/20 px-5 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-2 shadow-lg cursor-pointer pointer-events-auto"
-              >
-                ✕ Close Board
-              </button>
-            </div>
+            {/* Right: Close button — always visible */}
+            <button
+              onClick={() => setShowWhiteboard(false)}
+              className="ml-4 shrink-0 rounded-full bg-red-500/20 px-4 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/30 border border-red-500/30 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              ✕ Close
+            </button>
           </div>
 
-          {/* Canvas + Toolbars Area */}
+          {/* Canvas Area — no more separate left toolbar div */}
           <div className="flex-1 relative overflow-hidden">
-            {/* Left Toolbar */}
-            <div className="absolute left-6 top-6 z-30 max-h-[calc(100%-3rem)] overflow-y-auto rounded-2xl bg-zinc-950/90 border border-white/10 p-2 shadow-2xl backdrop-blur pointer-events-auto">
-              <Toolbar
-                tool={tool}
-                setTool={setTool}
-                color={color}
-                setColor={setColor}
-                penSize={penSize}
-                setPenSize={setPenSize}
-                undo={() => whiteboardRef.current?.undo()}
-                redo={() => whiteboardRef.current?.redo()}
-                clear={() => whiteboardRef.current?.clear()}
-                exportPNG={() => whiteboardRef.current?.exportPNG()}
-                assistTool={assistTool}
-                setAssistTool={setAssistTool}
-                zoomIn={() => whiteboardRef.current?.zoomIn()}
-                zoomOut={() => whiteboardRef.current?.zoomOut()}
-                resetView={() => whiteboardRef.current?.resetView()}
-              />
-            </div>
-
             {/* Main Canvas */}
             <div className="w-full h-full">
               {sidebarOpen && (
@@ -1270,7 +1485,7 @@ Use the above textbook excerpts to:
 
             {/* Graph Panels (bottom-right, above canvas) */}
             {magicSettings.equationDetection && detectedEquations.length > 0 && (
-              <div className="absolute bottom-6 right-24 z-30 flex flex-col-reverse gap-3 items-end max-h-[85vh] overflow-y-auto">
+              <div className="absolute bottom-6 right-6 z-30 flex flex-col-reverse gap-3 items-end max-h-[85vh] overflow-y-auto">
                 {detectedEquations.map((eq) => (
                   <GraphPlotter
                     key={eq}
@@ -1281,36 +1496,79 @@ Use the above textbook excerpts to:
               </div>
             )}
 
-            {/* Magic Side Panel */}
-            <div
-              className="absolute right-0 top-0 z-40 flex h-full w-[24rem] max-w-[90vw] items-start justify-end pt-6 pr-6 transition-all duration-300"
-              style={{ transform: magicOpen ? "translateX(0)" : "translateX(100%)" }}
-            >
-              <div className="pointer-events-auto max-h-[calc(100%-3rem)] overflow-y-auto rounded-3xl bg-zinc-950/95 border border-white/15 p-6 shadow-2xl backdrop-blur w-full">
-                <div className="mb-4 flex justify-between items-center pb-3 border-b border-white/10">
-                  <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-400">✨ Magic AI Assistant</span>
-                  <button
-                    onClick={() => setMagicOpen(false)}
-                    className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition cursor-pointer"
-                  >
-                    Close
-                  </button>
+            {/* Magic AI Compact Panel — opens below Magic AI button */}
+            {magicOpen && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 w-[440px] max-w-[95vw] rounded-2xl bg-zinc-950/98 border border-white/15 shadow-2xl backdrop-blur-2xl overflow-hidden pointer-events-auto animate-fade-in">
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                  <span className="text-xs font-black uppercase tracking-widest text-blue-400">✨ Magic AI</span>
+                  <button onClick={() => setMagicOpen(false)} className="text-white/40 hover:text-white text-xs px-2 py-1 rounded transition cursor-pointer">✕</button>
                 </div>
-                <MagicBar
-                  settings={magicSettings}
-                  setSettings={setMagicSettings}
-                  suggestions={suggestions}
-                  onSuggestionClick={(s) => setSuggestions((cur) => [s, ...cur.filter((i) => i !== s)])}
-                />
+                <div className="p-4 space-y-3">
+                  {/* Quick Suggestion Chips */}
+                  <div className="flex flex-wrap gap-2">
+                    {suggestions.map(s => (
+                      <button key={s} onClick={() => { setMagicInput(s); runMagicAI(s); }}
+                        className="rounded-full bg-white/5 hover:bg-indigo-600/30 border border-white/10 hover:border-indigo-500/40 px-3 py-1 text-[10px] text-white/70 hover:text-white transition cursor-pointer">
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Custom Input */}
+                  <div className="flex gap-2">
+                    <input
+                      value={magicInput}
+                      onChange={e => setMagicInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && runMagicAI(magicInput)}
+                      placeholder="Ask AI about the lesson..."
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/30 outline-none focus:border-indigo-500/50 transition"
+                    />
+                    <button onClick={() => runMagicAI(magicInput)}
+                      disabled={magicLoading || !magicInput.trim()}
+                      className="rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-4 py-2 text-xs font-bold text-white transition cursor-pointer">
+                      {magicLoading ? '...' : '→'}
+                    </button>
+                  </div>
+                  {/* Toggle Settings */}
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-white/5">
+                    {([
+                      { key: 'beautify', label: '✍️ Beautify' },
+                      { key: 'shapeDetection', label: '⬡ Shapes' },
+                      { key: 'equationDetection', label: '∑ Equations' },
+                    ] as { key: keyof MagicSettings; label: string }[]).map(item => (
+                      <button key={item.key}
+                        onClick={() => setMagicSettings(prev => ({ ...prev, [item.key]: !prev[item.key] }))}
+                        className={`rounded-full px-3 py-1 text-[10px] border transition cursor-pointer ${
+                          magicSettings[item.key] ? 'bg-indigo-600/30 border-indigo-500/40 text-indigo-300' : 'bg-white/5 border-white/10 text-white/40'
+                        }`}>
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* AI Response */}
+                  {magicLoading && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{animationDelay:'0ms'}} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{animationDelay:'150ms'}} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{animationDelay:'300ms'}} />
+                      <span className="text-[10px] text-white/40">Thinking...</span>
+                    </div>
+                  )}
+                  {magicResponse && !magicLoading && (
+                    <div className="rounded-xl bg-white/5 border border-white/10 p-3 max-h-56 overflow-y-auto space-y-1">
+                      {parseFormattedText(magicResponse)}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
 
       {/* IN-PLACE TEXTBOOK & PDF VIEWER OVERLAY */}
       {showTextbook && (
-        <div className="absolute inset-4 z-40 rounded-[40px] overflow-hidden bg-[#0a0a0c] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
+        <div className="absolute inset-4 z-[100] rounded-[40px] overflow-hidden bg-[#0a0a0c] border border-white/15 shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-fade-in text-white">
           {/* Top Bar */}
           <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 bg-zinc-950/90 backdrop-blur z-30">
             <div className="flex items-center gap-4">
@@ -1399,7 +1657,8 @@ Use the above textbook excerpts to:
       </div>
 
       {/* Session Toggle, Whiteboard & Textbook Buttons */}
-      <div className="absolute top-6 right-6 z-50 flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity">
+      {!showWhiteboard && !showTextbook && (
+        <div className="absolute top-6 right-6 z-50 flex items-center gap-3 opacity-80 hover:opacity-100 transition-opacity">
         <button
           onClick={() => {
             const next = !showTextbook;
@@ -1424,6 +1683,7 @@ Use the above textbook excerpts to:
         </button>
         <button onClick={toggleSession} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border border-white/10 cursor-pointer ${isListening ? "bg-red-500/20 border-red-500/50 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse" : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20"}`} title={isListening ? "Stop Session" : "Start Session"}>{isListening ? "⏹" : "▶"}</button>
       </div>
+      )}
     </div>
   );
 }

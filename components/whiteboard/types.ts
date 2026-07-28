@@ -8,7 +8,9 @@ export type Tool =
   | "highlighter"
   | "laser"
   | "pan"
-  | "text";
+  | "text"
+  | "triangle"
+  | "polygon";
 
 export interface Point {
   x: number;

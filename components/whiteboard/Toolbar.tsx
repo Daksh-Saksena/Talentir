@@ -63,7 +63,7 @@ export default function Toolbar({
     <button
       title={label}
       onClick={() => setTool(value)}
-      className={`w-12 h-12 rounded-xl transition-all duration-200 text-xl
+      className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 text-lg
       ${
         tool === value
           ? "bg-blue-600 text-white shadow-lg scale-105"
@@ -78,100 +78,91 @@ export default function Toolbar({
     <div className="flex flex-col gap-4 p-2">
 
       {/* Toolbar */}
-      <div className="w-20 rounded-2xl border border-zinc-700 bg-zinc-900/90 p-3 shadow-2xl backdrop-blur-xl">
-
-        <div className="flex flex-col items-center gap-3">
+      <div className="rounded-2xl border border-zinc-700 bg-zinc-900/90 p-3 shadow-2xl backdrop-blur-xl w-[104px]">
+        <div className="grid grid-cols-2 gap-2 place-items-center">
 
           {toolButton("✏️", "Pen (P)", "pen")}
-
           {toolButton("🧽", "Eraser (E)", "eraser")}
-
           {toolButton("🖍️", "Highlighter", "highlighter")}
-
           {toolButton("📍", "Laser Pointer", "laser")}
-
-          {toolButton("✋", "Pan", "pan")}
-
-          <hr className="w-full border-zinc-700"/>
-
-          <div className="flex flex-col gap-2">
-            {(["line", "rectangle", "circle", "arrow"] as Tool[]).map((shape) => (
-              <button
-                key={shape}
-                title={shape}
-                onClick={() => setTool(shape)}
-                className={`w-12 h-12 rounded-xl text-sm font-semibold transition-all ${
-                  tool === shape ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
-                }`}
-              >
-                {shape === "line" ? "╱" : shape === "rectangle" ? "▭" : shape === "circle" ? "◯" : "↗"}
-              </button>
-            ))}
+          
+          <div className="col-span-2 w-full flex justify-center">
+            {toolButton("✋", "Pan", "pan")}
           </div>
 
-          <hr className="w-full border-zinc-700"/>
+          <div className="col-span-2 w-full border-t border-zinc-700 my-1"/>
+
+          {(["line", "rectangle", "circle", "arrow"] as Tool[]).map((shape) => (
+            <button
+              key={shape}
+              title={shape}
+              onClick={() => setTool(shape)}
+              className={`w-10 h-10 flex items-center justify-center rounded-xl text-sm font-semibold transition-all ${
+                tool === shape ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+              }`}
+            >
+              {shape === "line" ? "╱" : shape === "rectangle" ? "▭" : shape === "circle" ? "◯" : "↗"}
+            </button>
+          ))}
+
+          <div className="col-span-2 w-full border-t border-zinc-700 my-1"/>
 
           <button
             onClick={undo}
             title="Undo (Ctrl+Z)"
-            className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
           >
             ↩
           </button>
-
           <button
             onClick={redo}
             title="Redo (Ctrl+Y)"
-            className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
           >
             ↪
           </button>
-
           <button
             onClick={clear}
             title="Clear"
-            className="w-12 h-12 rounded-xl bg-red-600 hover:bg-red-700 text-white"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-700 text-white"
           >
             🗑
           </button>
-
           <button
             onClick={exportPNG}
             title="Export PNG"
-            className="w-12 h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             💾
           </button>
-
           <button
             onClick={zoomIn}
             title="Zoom In"
-            className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
           >
             +
           </button>
-
           <button
             onClick={zoomOut}
             title="Zoom Out"
-            className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
           >
             −
           </button>
-
-          <button
-            onClick={resetView}
-            title="Reset View"
-            className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
-          >
-            ⌂
-          </button>
-
+          <div className="col-span-2 w-full flex justify-center">
+            <button
+              onClick={resetView}
+              title="Reset View"
+              className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white"
+            >
+              ⌂
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-zinc-700 bg-zinc-900/90 p-3 shadow-2xl backdrop-blur-xl">
-        <p className="mb-2 text-center text-xs text-zinc-300">Math tools</p>
+      <div className="rounded-2xl border border-zinc-700 bg-zinc-900/90 p-3 shadow-2xl backdrop-blur-xl w-[104px]">
+        <p className="mb-2 text-center text-xs text-zinc-300">Math</p>
         <div className="grid grid-cols-2 gap-2">
           {[
             { key: "ruler", label: "📏" },
@@ -193,9 +184,7 @@ export default function Toolbar({
       </div>
 
       {/* Colour Picker */}
-
-      <div className="rounded-2xl bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-3 shadow-2xl">
-
+      <div className="rounded-2xl bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-3 shadow-2xl w-[104px]">
         <p className="text-xs text-zinc-300 mb-2 text-center">
           Colour
         </p>
@@ -216,17 +205,12 @@ export default function Toolbar({
                 background: c,
               }}
             />
-
           ))}
-
         </div>
-
       </div>
 
       {/* Pen Size */}
-
-      <div className="rounded-2xl bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-3 shadow-2xl">
-
+      <div className="rounded-2xl bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 p-3 shadow-2xl w-[104px]">
         <p className="text-xs text-zinc-300 text-center mb-2">
           Size
         </p>

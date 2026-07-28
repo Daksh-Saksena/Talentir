@@ -151,19 +151,33 @@ export function drawStroke(
     ctx.lineTo(last.x, last.y);
     ctx.stroke();
     drawArrow(ctx, first, last);
-  } else {
-    ctx.beginPath();
-    ctx.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
-    ctx.fill();
-
+  } else if (stroke.tool === "triangle" || stroke.tool === "polygon") {
     ctx.beginPath();
     ctx.moveTo(first.x, first.y);
-
     for (const point of stroke.points.slice(1)) {
       ctx.lineTo(point.x, point.y);
     }
-
+    ctx.closePath();
     ctx.stroke();
+  } else {
+    // Smooth Bezier rendering for pen strokes (covers regular freehand AND beautified shapes)
+    const pts = stroke.points;
+    if (pts.length === 1) {
+      ctx.beginPath();
+      ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i + 1].x) / 2;
+        const my = (pts[i].y + pts[i + 1].y) / 2;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      const last = pts[pts.length - 1];
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    }
   }
 
   ctx.globalAlpha = 1;

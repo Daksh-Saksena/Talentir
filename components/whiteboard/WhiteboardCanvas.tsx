@@ -18,6 +18,7 @@ export interface WhiteboardCanvasHandle {
   redo: () => void;
   clear: () => void;
   exportPNG: () => void;
+  getCanvasDataURL: () => string | null;
   zoomIn: () => void;
   zoomOut: () => void;
   resetView: () => void;
@@ -197,42 +198,359 @@ function allWordsAreValid(text: string) {
     .every((token) => isValidWordCandidate(token));
 }
 
-// Smooth stroke using Catmull-Rom spline interpolation for better handwriting recognition
-function smoothStroke(points: Point[]): Point[] {
-  if (points.length < 4) return points;
-  
-  const smoothed: Point[] = [];
-  const tension = 0.5;
-  
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[Math.min(points.length - 1, i + 2)];
-    
-    for (let t = 0; t < 1; t += 0.2) {
-      const t2 = t * t;
-      const t3 = t2 * t;
-      
-      const q = 0.5 * (
-        (2 * p1.x) +
-        (-p0.x + p2.x) * t +
-        (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-        (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
-      );
-      
-      const r = 0.5 * (
-        (2 * p1.y) +
-        (-p0.y + p2.y) * t +
-        (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-        (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
-      );
-      
-      smoothed.push({ x: q, y: r });
+// ── Apple Notes-style Stroke Beautification Engine ────────────────────────────
+// Runs once on pen-up; detects intended shape and replaces raw stroke with
+// a clean geometric version. No API required — pure canvas math.
+
+interface BeautifiedStroke {
+  tool: Tool;
+  points: Point[];
+}
+
+/** Resample stroke to N evenly-spaced points for reliable analysis. */
+function resamplePoints(pts: Point[], n: number): Point[] {
+  if (pts.length < 2) return pts;
+  const totalLen = pts.reduce((acc, p, i) => i === 0 ? 0 : acc + Math.hypot(p.x - pts[i-1].x, p.y - pts[i-1].y), 0);
+  const step = totalLen / (n - 1);
+  const out: Point[] = [pts[0]];
+  let dist = 0;
+  let prev = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y);
+    if (dist + d >= step) {
+      const t = (step - dist) / d;
+      out.push({ x: prev.x + t * (pts[i].x - prev.x), y: prev.y + t * (pts[i].y - prev.y) });
+      prev = out[out.length - 1];
+      dist = 0;
+    } else {
+      dist += d;
+      prev = pts[i];
+    }
+    if (out.length === n - 1) break;
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** How straight is the stroke? Returns 0 (curved) – 1 (perfectly straight). */
+function straightness(pts: Point[]): number {
+  if (pts.length < 2) return 1;
+  const first = pts[0], last = pts[pts.length - 1];
+  const dx = last.x - first.x, dy = last.y - first.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 4) return 0;
+  const maxDev = pts.reduce((acc, p) => {
+    // perpendicular distance from p to line first→last
+    const dist = Math.abs(dy * p.x - dx * p.y + last.x * first.y - last.y * first.x) / len;
+    return Math.max(acc, dist);
+  }, 0);
+  return 1 - Math.min(1, maxDev / len);
+}
+
+/** Is the stroke a closed loop (first ≈ last)? */
+function isClosedLoop(pts: Point[]): boolean {
+  if (pts.length < 8) return false;
+  const d = Math.hypot(pts[0].x - pts[pts.length-1].x, pts[0].y - pts[pts.length-1].y);
+  const bbox = boundingBox(pts);
+  const size = Math.max(bbox.w, bbox.h);
+  return size > 10 && d < size * 0.45;
+}
+
+function boundingBox(pts: Point[]) {
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for (const p of pts) {
+    minX=Math.min(minX,p.x); minY=Math.min(minY,p.y);
+    maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y);
+  }
+  return { x:minX, y:minY, w:maxX-minX, h:maxY-minY, cx:(minX+maxX)/2, cy:(minY+maxY)/2 };
+}
+
+/** How circle-like is a closed loop? Returns 0–1. */
+function circleness(pts: Point[]): number {
+  const bb = boundingBox(pts);
+  const cx = bb.cx, cy = bb.cy;
+  const radii = pts.map(p => Math.hypot(p.x - cx, p.y - cy));
+  const mean = radii.reduce((a,b)=>a+b,0) / radii.length;
+  if (mean < 1) return 0;
+  const variance = radii.reduce((acc,r) => acc + (r - mean)**2, 0) / radii.length;
+  return 1 - Math.min(1, Math.sqrt(variance) / mean);
+}
+
+/** How rectangle-like is a closed loop? Checks aspect ratio & corner detection. */
+function rectangleness(pts: Point[]): number {
+  // Sample 64 points; check that most points are near the bbox edges
+  const bb = boundingBox(pts);
+  if (bb.w < 8 || bb.h < 8) return 0;
+  const edgeCount = pts.filter(p => {
+    const nearLeft   = Math.abs(p.x - bb.x) < bb.w * 0.18;
+    const nearRight  = Math.abs(p.x - (bb.x + bb.w)) < bb.w * 0.18;
+    const nearTop    = Math.abs(p.y - bb.y) < bb.h * 0.18;
+    const nearBottom = Math.abs(p.y - (bb.y + bb.h)) < bb.h * 0.18;
+    return nearLeft || nearRight || nearTop || nearBottom;
+  }).length;
+  return edgeCount / pts.length;
+}
+
+/** Generate smooth cardinal-spline through the original points (for free curves). */
+function cardinalSplinePoints(pts: Point[], tension = 0.4, steps = 8): Point[] {
+  if (pts.length < 3) return pts;
+  const out: Point[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(pts.length - 1, i + 2)];
+    for (let t = 0; t < steps; t++) {
+      const s = t / steps;
+      const s2 = s * s, s3 = s2 * s;
+      const x = 0.5*((2*p1.x)+(-p0.x+p2.x)*s+(2*p0.x-5*p1.x+4*p2.x-p3.x)*s2+(-p0.x+3*p1.x-3*p2.x+p3.x)*s3);
+      const y = 0.5*((2*p1.y)+(-p0.y+p2.y)*s+(2*p0.y-5*p1.y+4*p2.y-p3.y)*s2+(-p0.y+3*p1.y-3*p2.y+p3.y)*s3);
+      out.push({x, y});
     }
   }
-  smoothed.push(points[points.length - 1]);
-  return smoothed;
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** Generate arc/ellipse points from bounding box. */
+function ellipsePoints(cx: number, cy: number, rx: number, ry: number, n=64): Point[] {
+  return Array.from({length: n+1}, (_,i) => ({
+    x: cx + rx * Math.cos(2*Math.PI*i/n),
+    y: cy + ry * Math.sin(2*Math.PI*i/n),
+  }));
+}
+
+/** Rectangle corner points. */
+function rectPoints(x:number,y:number,w:number,h:number): Point[] {
+  return [{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h},{x,y}];
+}
+
+/** 
+ * Resample stroke by exact arc-length interval (e.g. every 5px).
+ * This ensures fast and slow stylus movements get identical, perfect curve polishing!
+ */
+function resampleByArcLength(pts: Point[], interval = 5): Point[] {
+  if (pts.length < 2) return pts;
+  const out: Point[] = [pts[0]];
+  let dist = 0;
+  let prev = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y);
+    if (dist + d >= interval) {
+      const t = (interval - dist) / d;
+      out.push({ x: prev.x + t * (pts[i].x - prev.x), y: prev.y + t * (pts[i].y - prev.y) });
+      prev = out[out.length - 1];
+      dist = 0;
+      while (Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y) >= interval) {
+        const rem = Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y);
+        const t2 = interval / rem;
+        out.push({ x: prev.x + t2 * (pts[i].x - prev.x), y: prev.y + t2 * (pts[i].y - prev.y) });
+        prev = out[out.length - 1];
+      }
+    } else {
+      dist += d;
+      prev = pts[i];
+    }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** 
+ * Apply high-polish Streamline curve smoothing WITH Corner Preservation!
+ * This adaptive algorithm detects sharp turns (like the shoulder of 'r' or angles in 'H') 
+ * and locks them in place, while applying heavy smoothing to the curves between them.
+ * This ensures letters stay 100% legible and crisp while mouse jitter is eradicated.
+ */
+function smoothHandwritingInk(pts: Point[], passes = 3): Point[] {
+  if (pts.length < 3) return pts;
+  
+  // High-res sampling so we don't skip over tiny corners
+  let current = resampleByArcLength(pts, 3);
+  if (current.length < 3) return current;
+
+  // 1. Detect Anchor Points (Corners > ~35 degrees)
+  const anchors = new Array(current.length).fill(false);
+  anchors[0] = true;
+  anchors[current.length - 1] = true;
+  
+  for (let i = 1; i < current.length - 1; i++) {
+    const prev = current[i - 1];
+    const curr = current[i];
+    const next = current[i + 1];
+    
+    const a1 = Math.atan2(curr.y - prev.y, curr.x - prev.x);
+    const a2 = Math.atan2(next.y - curr.y, next.x - curr.x);
+    let diff = Math.abs(a2 - a1);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    
+    // If turning angle is > 0.6 radians (~34 degrees), it's a sharp corner (like 'H', 'r', 'v')
+    // We lock this point so it NEVER loses definition during smoothing!
+    if (diff > 0.6) {
+      anchors[i] = true;
+    }
+  }
+
+  // 2. Adaptive Smoothing (Smooth the curves, but never move the anchors!)
+  for (let pass = 0; pass < passes; pass++) {
+    const next: Point[] = [current[0]];
+    for (let i = 1; i < current.length - 1; i++) {
+      if (anchors[i]) {
+        // Locked corner! Retains 100% crisp definition for 'r', 'H', 'w', etc.
+        next.push(current[i]);
+      } else {
+        // Smooth out the hand tremor on continuous curves and lines!
+        next.push({
+          x: 0.15 * current[i - 1].x + 0.70 * current[i].x + 0.15 * current[i + 1].x,
+          y: 0.15 * current[i - 1].y + 0.70 * current[i].y + 0.15 * current[i + 1].y,
+        });
+      }
+    }
+    next.push(current[current.length - 1]);
+    current = next;
+  }
+  return current;
+}
+
+function perpendicularDistance(p: Point, lineStart: Point, lineEnd: Point): number {
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return Math.hypot(p.x - lineStart.x, p.y - lineStart.y);
+  return Math.abs(dy * p.x - dx * p.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x) / len;
+}
+
+function rdp(pts: Point[], epsilon: number): Point[] {
+  if (pts.length < 3) return pts;
+  let maxDist = 0;
+  let index = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const dist = perpendicularDistance(pts[i], pts[0], pts[pts.length - 1]);
+    if (dist > maxDist) {
+      maxDist = dist;
+      index = i;
+    }
+  }
+  if (maxDist > epsilon) {
+    const left = rdp(pts.slice(0, index + 1), epsilon);
+    const right = rdp(pts.slice(index), epsilon);
+    return left.slice(0, left.length - 1).concat(right);
+  } else {
+    return [pts[0], pts[pts.length - 1]];
+  }
+}
+
+/** Filter out duplicate/super-close consecutive vertices from RDP. */
+function getUniqueVertices(pts: Point[], minSep = 20): Point[] {
+  if (pts.length === 0) return [];
+  const unique: Point[] = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const prev = unique[unique.length - 1];
+    if (Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y) >= minSep) {
+      unique.push(pts[i]);
+    }
+  }
+  if (unique.length > 1 && Math.hypot(unique[0].x - unique[unique.length - 1].x, unique[0].y - unique[unique.length - 1].y) < minSep) {
+    unique.pop();
+  }
+  return unique;
+}
+
+/**
+ * Main beautification function. Given raw pen-stroke points, returns
+ * a new Stroke that is either a snapped geometric shape (line/circle/rect/triangle)
+ * OR smoothly beautified handwriting ink.
+ */
+function beautifyStroke(stroke: { points: Point[]; tool: Tool }): BeautifiedStroke | null {
+  const pts = stroke.points;
+  if (pts.length < 3) return null;
+
+  const totalLen = pts.reduce((acc, p, i) => i === 0 ? 0 : acc + Math.hypot(p.x - pts[i-1].x, p.y - pts[i-1].y), 0);
+  if (totalLen < 15) return null;
+
+  const sampled = resamplePoints(pts, 64);
+  const closed = isClosedLoop(sampled);
+  const straight = straightness(sampled);
+
+  // ── 1. Straight Line Snapping with Angle Leveling (Apple Notes style) ────
+  if (straight > 0.90) {
+    let first = pts[0], last = pts[pts.length - 1];
+    const dx = last.x - first.x, dy = last.y - first.y;
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    if (Math.abs(angle) < 7 || Math.abs(angle - 180) < 7 || Math.abs(angle + 180) < 7) {
+      last = { x: last.x, y: first.y };
+    } else if (Math.abs(angle - 90) < 7 || Math.abs(angle + 90) < 7) {
+      last = { x: first.x, y: last.y };
+    }
+    return { tool: 'line', points: [first, last] };
+  }
+
+  // ── 2. Strict Closed Shapes (Circles, Ellipses, Squares, Rectangles, Triangles, Diamonds) ──
+  if (closed) {
+    const cc = circleness(sampled);
+    const bb = boundingBox(sampled);
+
+    // Circle or ellipse
+    if (cc > 0.85 && (bb.w > 35 || bb.h > 35)) {
+      const rx = bb.w / 2, ry = bb.h / 2;
+      const aspectRatio = Math.min(rx, ry) / Math.max(rx, ry);
+      if (aspectRatio > 0.80) {
+        const r = (rx + ry) / 2;
+        return { tool: 'circle', points: [{ x: bb.cx, y: bb.cy }, { x: bb.cx + r, y: bb.cy }] };
+      } else {
+        return { tool: 'polygon', points: ellipsePoints(bb.cx, bb.cy, rx, ry) };
+      }
+    }
+
+    // Polygon recognition via Ramer-Douglas-Peucker (Triangles, Squares, Rectangles, Diamonds)
+    if (bb.w > 35 || bb.h > 35) {
+      const closedLoop = [...sampled, sampled[0]];
+      const epsilon = Math.max(bb.w, bb.h) * 0.11;
+      const simplified = rdp(closedLoop, epsilon);
+      const vertices = getUniqueVertices(simplified, 20);
+
+      // ── Triangle (3 distinct vertices) ──
+      if (vertices.length === 3) {
+        return { tool: 'triangle', points: vertices };
+      }
+
+      // ── Quadrilateral (4 distinct vertices) — Square, Rectangle, or Diamond ──
+      if (vertices.length === 4) {
+        const aspectRatio = Math.min(bb.w, bb.h) / Math.max(bb.w, bb.h);
+        const isAxisAligned = vertices.every(v => {
+          const nearLeftOrRight = Math.abs(v.x - bb.x) < bb.w * 0.22 || Math.abs(v.x - (bb.x + bb.w)) < bb.w * 0.22;
+          const nearTopOrBottom = Math.abs(v.y - bb.y) < bb.h * 0.22 || Math.abs(v.y - (bb.y + bb.h)) < bb.h * 0.22;
+          return nearLeftOrRight && nearTopOrBottom;
+        });
+
+        if (isAxisAligned) {
+          if (aspectRatio > 0.82) {
+            // Snap to perfect Square centered at bounding box!
+            const s = (bb.w + bb.h) / 2;
+            return { tool: 'rectangle', points: [{ x: bb.cx - s/2, y: bb.cy - s/2 }, { x: bb.cx + s/2, y: bb.cy + s/2 }] };
+          } else {
+            // Snap to perfect Rectangle!
+            return { tool: 'rectangle', points: [{ x: bb.x, y: bb.y }, { x: bb.x + bb.w, y: bb.y + bb.h }] };
+          }
+        } else {
+          // Rotated diamond or trapezoid
+          return { tool: 'polygon', points: vertices };
+        }
+      }
+    }
+  }
+
+  // ── 3. High-Polish Calligraphy Smoothing (Procreate/Apple Notes style) ────
+  // Transforms shaky, jittery mouse/stylus handwriting into silky-smooth curves!
+  const smoothedInk = smoothHandwritingInk(pts, 5);
+  return { tool: 'pen', points: smoothedInk };
+}
+
+// Alias for OCR rendering (unchanged)
+function smoothStroke(points: Point[]): Point[] {
+  if (points.length < 4) return points;
+  const sampled = resamplePoints(points, Math.min(32, Math.max(8, Math.floor(points.length/4))));
+  return cardinalSplinePoints(sampled);
 }
 
 // Draw smooth handwriting strokes for OCR with better quality
@@ -529,11 +847,18 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
   const [isProcessing, setIsProcessing] = useState(false);
   const magicOverlayRef = useRef<OverlaySegment[]>([]);
   const workerRef = useRef<any>(null);
+  
   const processingRef = useRef(false);
   const pendingMagicRef = useRef(false);
   const magicIdleTimeout = useRef<number | null>(null);
   const magicCommitTimeout = useRef<number | null>(null);
   const pendingMagicReplacementRef = useRef<PendingMagicReplacement | null>(null);
+  
+  // Laser and Math tool tracking
+  const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
+  const laserPointsRef = useRef<{ x: number; y: number; time: number }[]>([]);
+  const animationFrameRef = useRef<number | null>(null);
+
   const historyRef = useRef<HistoryAction[]>([]);
   const redoHistoryRef = useRef<HistoryAction[]>([]);
   const offsetRef = useRef(offset);
@@ -555,6 +880,29 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
   // Preload Caveat handwriting font so canvas renders it immediately on first OCR
   useEffect(() => {
     preloadHandwritingFont();
+  }, []);
+
+  // Continuous animation loop for fading laser points
+  useEffect(() => {
+    const animate = () => {
+      let needsRedraw = false;
+      if (laserPointsRef.current.length > 0) {
+        const now = Date.now();
+        const initialLength = laserPointsRef.current.length;
+        laserPointsRef.current = laserPointsRef.current.filter(p => now - p.time < 800);
+        if (laserPointsRef.current.length < initialLength || laserPointsRef.current.length > 0) {
+          needsRedraw = true;
+        }
+      }
+      if (needsRedraw) {
+        redraw();
+      }
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+    animationFrameRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    };
   }, []);
 
   const redraw = useCallback(() => {
@@ -580,8 +928,46 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       }
     }
 
-    if (assistTool !== "none") {
+    // Draw Laser Pointer Trail
+    if (laserPointsRef.current.length > 0) {
       ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      const now = Date.now();
+      
+      for (let i = 1; i < laserPointsRef.current.length; i++) {
+        const p1 = laserPointsRef.current[i - 1];
+        const p2 = laserPointsRef.current[i];
+        
+        const age = now - p2.time;
+        if (age >= 800) continue;
+        
+        const opacity = Math.max(0, 1 - age / 800);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = `rgba(239, 68, 68, ${opacity})`;
+        ctx.lineWidth = (5 + (1-opacity)*2) / zoomRef.current;
+        ctx.stroke();
+      }
+      
+      const head = laserPointsRef.current[laserPointsRef.current.length - 1];
+      if (now - head.time < 100) {
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, 4 / zoomRef.current, 0, Math.PI * 2);
+        ctx.fillStyle = "#ef4444";
+        ctx.fill();
+        ctx.shadowColor = "#ef4444";
+        ctx.shadowBlur = 10 / zoomRef.current;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Draw active math tool centered at cursor position
+    if (assistTool !== "none" && cursorPosRef.current) {
+      ctx.save();
+      ctx.translate(cursorPosRef.current.x, cursorPosRef.current.y);
       ctx.strokeStyle = "rgba(37, 99, 235, 0.65)";
       ctx.lineWidth = 1.5 / zoomRef.current;
       ctx.setLineDash([6, 4]);
@@ -634,7 +1020,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     }
 
     ctx.restore();
-  }, [assistTool]);
+  }, [assistTool, color]);
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -810,7 +1196,6 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       
       if (ocrStrokes.length === 0) {
         console.log("[OCR] No strokes found");
-        // Preserve existing overlay if text was already replaced
         if (magicOverlayRef.current.length > 0) {
           setIsProcessing(false);
           redraw();
@@ -879,13 +1264,11 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
 
             let recognizedText = "";
 
-            // Primary: OpenAI Vision API for extreme handwriting recognition accuracy
             const visionResult = await performVisionOCR(strokeCanvas);
             if (visionResult) {
               recognizedText = visionResult;
               console.log("[OCR] Vision AI recognized text:", visionResult);
             } else {
-              // Fallback: Local Tesseract worker
               const worker = await initWorker();
               if (worker) {
                 const rawResult = await worker.recognize(strokeCanvas.toDataURL("image/png"));
@@ -920,7 +1303,6 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
               if (isEquation) {
                 console.log("[Equation Detected — skipping beautify]", normalizedText);
                 onEquationDetected?.(normalizedText);
-                // Skip overlaying text — keep handwriting intact for equations
                 continue;
               }
             }
@@ -952,8 +1334,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
         const clustersToRemove = Array.from(recognizedStrokeIds);
 
         if (overlaySegments.length > 0) {
-          commitMagicText(overlaySegments, clustersToRemove);
-          console.log("[OCR Success] Replaced handwriting with beautified text", { count: overlaySegments.length });
+          console.log("[Apple Notes Mode] Background recognition complete (keeping original handwriting):", overlaySegments.map(s => s.text));
         } else {
           console.warn("[OCR] No text recognized in any cluster");
         }
@@ -979,7 +1360,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
         }
       }
     },
-    [getOCRStrokes, initWorker, magicSettings?.beautify, magicSettings?.ocr, redraw]
+    [getOCRStrokes, initWorker, magicSettings?.beautify, magicSettings?.ocr, redraw, color, magicSettings?.equationDetection, onEquationDetected]
   );
 
   const clearIdleMagicTimeout = useCallback(() => {
@@ -1025,7 +1406,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       return;
     }
 
-    if (tool === "pan" || tool === "laser") {
+    if (tool === "pan") {
       setIsPanning(true);
       panStartRef.current = {
         x: e.clientX,
@@ -1033,6 +1414,11 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
         offsetX: offsetRef.current.x,
         offsetY: offsetRef.current.y,
       };
+      return;
+    }
+    
+    if (tool === "laser") {
+      setDrawing(true);
       return;
     }
 
@@ -1056,6 +1442,9 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
   };
 
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const point = screenToWorld(e.clientX, e.clientY);
+    cursorPosRef.current = point;
+
     if (isPanning && panStartRef.current) {
       const deltaX = e.clientX - panStartRef.current.x;
       const deltaY = e.clientY - panStartRef.current.y;
@@ -1068,9 +1457,14 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       return;
     }
 
+    if (tool === "laser" && drawing) {
+      laserPointsRef.current.push({ x: point.x, y: point.y, time: Date.now() });
+      redraw();
+      return;
+    }
+
     if (!drawing || tool === "pan" || tool === "laser") return;
 
-    const point = screenToWorld(e.clientX, e.clientY);
     if (!currentStroke.current) return;
 
     currentStroke.current.points.push(point);
@@ -1104,8 +1498,19 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
         redoHistoryRef.current = [];
       }
     } else {
-      strokes.current.push(stroke);
-      historyRef.current.push({ type: "add", stroke });
+      let finalStroke = stroke;
+      if (stroke.tool === "pen" && magicSettings?.shapeDetection !== false) {
+        const beautified = beautifyStroke(stroke);
+        if (beautified) {
+          finalStroke = {
+            ...stroke,
+            tool: beautified.tool as typeof stroke.tool,
+            points: beautified.points,
+          };
+        }
+      }
+      strokes.current.push(finalStroke);
+      historyRef.current.push({ type: "add", stroke: finalStroke });
       redoHistoryRef.current = [];
     }
 
@@ -1113,15 +1518,10 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     setDrawing(false);
     redraw();
 
-    console.log("[Drawing Stopped] Triggering OCR", { hasSettings: !!magicSettings, ocr: magicSettings?.ocr, beautify: magicSettings?.beautify });
-    
     if (magicSettings?.ocr || magicSettings?.beautify) {
-      console.log("[OCR] Scheduling idle beautify after stopDrawing");
       scheduleMagicAfterIdle(800);
-    } else {
-      console.warn("[OCR] Magic settings disabled!");
     }
-  }, [isPanning, magicSettings?.beautify, magicSettings?.ocr, processMagic, redraw, magicSettings]);
+  }, [isPanning, magicSettings, redraw, scheduleMagicAfterIdle]);
 
   useEffect(() => {
     processMagic();
@@ -1178,6 +1578,28 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     exportPNG(canvas);
   }, []);
 
+  const getCanvasDataURL = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
+
+    const offscreen = document.createElement("canvas");
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    const ctx = offscreen.getContext("2d");
+    if (!ctx) return null;
+
+    // Fill solid white background so black ink is 100% visible to OpenAI Vision
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+
+    // Draw main whiteboard canvas over white background
+    ctx.drawImage(canvas, 0, 0);
+
+    const dataUrl = offscreen.toDataURL("image/jpeg", 0.92);
+    console.log("%c[Magic AI Vision] Whiteboard Snapshot captured for OpenAI Vision:", "color: #3b82f6; font-weight: bold;", `${dataUrl.slice(0, 45)}... (${Math.round(dataUrl.length / 1024)} KB)`);
+    return dataUrl;
+  }, []);
+
   const zoomIn = useCallback(() => {
     zoomAtPoint(1.1, window.innerWidth / 2, window.innerHeight / 2);
   }, [zoomAtPoint]);
@@ -1218,11 +1640,12 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
       redo,
       clear,
       exportPNG: exportCanvasPNG,
+      getCanvasDataURL,
       zoomIn,
       zoomOut,
       resetView,
     }),
-    [undo, redo, clear, exportCanvasPNG, zoomIn, zoomOut, resetView]
+    [undo, redo, clear, exportCanvasPNG, getCanvasDataURL, zoomIn, zoomOut, resetView]
   );
 
   useEffect(() => {
@@ -1290,19 +1713,27 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProp
     <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.95),_rgba(245,245,245,1))]">
       <canvas
         ref={canvasRef}
-        className={`absolute inset-0 h-full w-full touch-none ${tool === "pan" ? "cursor-grab" : "cursor-crosshair"}`}
+        className={`absolute inset-0 h-full w-full touch-none ${tool === "pan" ? "cursor-grab active:cursor-grabbing" : tool === "laser" ? "cursor-crosshair" : "cursor-crosshair"}`}
         style={{ touchAction: "none" }}
         onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           startDrawing(e);
         }}
-        onPointerMove={draw}
+        onPointerMove={(e) => {
+          cursorPosRef.current = screenToWorld(e.clientX, e.clientY);
+          draw(e);
+          if (assistTool !== "none" && !drawing && !isPanning) {
+            redraw(); // Force redraw so math tools perfectly follow cursor without lag
+          }
+        }}
         onPointerUp={(e) => {
           stopDrawing();
           e.currentTarget.releasePointerCapture(e.pointerId);
         }}
         onPointerLeave={() => {
+          cursorPosRef.current = null;
+          if (assistTool !== "none") redraw();
           if (drawing || isPanning) {
             stopDrawing();
           }
