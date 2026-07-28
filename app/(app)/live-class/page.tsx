@@ -1039,15 +1039,20 @@ Use the above textbook excerpts to:
       - If no new homework was explicitly assigned in this transcript chunk, return the exact existing Current Todo List unchanged!
 
       IMPORTANT — "teaching_intent" RULES (strict):
-      - This field is a running, cumulative SUMMARY of the class for students.
-      - Build upon the Current Cumulative Summary by appending new factual information from the transcript. Make it more comprehensive from the start of the class. Do NOT just replace it with a single sentence!
+      - This field is a TOPIC SUMMARY for students — 1-2 sentences describing the concept being taught.
+      - Keep it focused strictly on the visual intent for image search relevance.
       - Do NOT mention students, audience, or learning objectives.
       - Keep it factual, concise, curriculum-focused.
+
+      IMPORTANT — "cumulative_summary" RULES (strict):
+      - This field is a running, comprehensive SUMMARY of the class.
+      - Build upon the Current Cumulative Summary by appending new factual information from the transcript. Make it more comprehensive from the start of the class. Do NOT just replace it with a single sentence!
 
       Reply ONLY valid JSON:
       {
         "block_name": "the current teaching block name",
         "teaching_intent": "1-2 sentence factual summary of the concept being taught",
+        "cumulative_summary": "running comprehensive summary built from the previous one",
         "homework": ["string"],
         "type": "image"|"formula"|"none"|"keep_current",
         "primary_visual": { "type": "style string", "query": "search query" },
@@ -1108,9 +1113,9 @@ Use the above textbook excerpts to:
 
       // Update topic and teaching intent
       if (dec.topic && dec.topic !== topic) setTopic(dec.topic);
-      if (dec.teaching_intent && dec.teaching_intent !== summary) {
-        setSummary(dec.teaching_intent);
-        summaryRef.current = dec.teaching_intent;
+      if (dec.cumulative_summary && dec.cumulative_summary !== summary) {
+        setSummary(dec.cumulative_summary);
+        summaryRef.current = dec.cumulative_summary;
       }
 
       if (dec.homework && Array.isArray(dec.homework)) {
