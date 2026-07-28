@@ -879,16 +879,26 @@ export default function LiveClassPage() {
       // Append to rolling context window
       transcriptBuffer.current.push(text);
       if (transcriptBuffer.current.length > 8) transcriptBuffer.current.shift();
-      // Append to full session transcript and save to localStorage
+      // Append to full session transcript and save to localStorage immediately
       fullTranscriptRef.current.push(text);
       console.log('%c[Transcript]', 'color:#06b6d4; font-weight:bold;', text);
-      // Periodically persist (every 10 chunks) so nothing is lost on crash
-      if (fullTranscriptRef.current.length % 10 === 0) {
+      
+      try {
+        const currentId = sessionIdRef.current || `ts_${Date.now()}`;
+        if (!sessionIdRef.current) sessionIdRef.current = currentId;
         const sessions = JSON.parse(localStorage.getItem('cc-transcripts') || '[]');
-        const existing = sessions.findIndex((s: any) => s.id === sessionIdRef.current);
-        const entry = { id: sessionIdRef.current, date: new Date().toISOString(), topic, text: fullTranscriptRef.current.join(' '), chunks: [...fullTranscriptRef.current] };
+        const existing = sessions.findIndex((s: any) => s.id === currentId);
+        const entry = { 
+          id: currentId, 
+          date: new Date().toISOString(), 
+          topic: topic, 
+          text: fullTranscriptRef.current.join(' '), 
+          chunks: [...fullTranscriptRef.current] 
+        };
         if (existing >= 0) sessions[existing] = entry; else sessions.unshift(entry);
         localStorage.setItem('cc-transcripts', JSON.stringify(sessions));
+      } catch (err) {
+        console.error('[Transcript save error]', err);
       }
       setCountdown(30);
     }
