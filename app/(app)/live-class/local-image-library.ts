@@ -168,7 +168,9 @@ export const LOCAL_IMAGES: LocalImage[] = [
  * Tokenise a string into lower-case words (splits on spaces, hyphens, underscores, dots).
  */
 function tokenise(str: string): string[] {
-  return str.toLowerCase().split(/[\s\-_.,()/]+/).filter(Boolean);
+  // Ignore common short stop words that cause false positive matches
+  const stopWords = new Set(["the", "and", "for", "with", "from", "into", "during", "including", "until", "against", "among", "throughout", "despite", "towards", "upon", "concerning", "about", "what", "how", "why", "when", "where", "who", "which", "that", "this", "these", "those", "can", "could", "would", "should", "will", "shall", "may", "might", "must", "have", "has", "had", "doing", "does", "did", "are", "was", "were", "been", "being", "business", "work", "working", "example", "concept", "illustration", "diagram", "infographic"]);
+  return str.toLowerCase().split(/[\s\-_.,()/]+/).filter(t => t.length > 2 && !stopWords.has(t));
 }
 
 /**
@@ -177,28 +179,28 @@ function tokenise(str: string): string[] {
  */
 export function scoreImage(image: LocalImage, query: string): number {
   const qTokens = new Set(tokenise(query));
+  if (qTokens.size === 0) return 0;
+
   const imageText = [image.filename, ...image.tags].join(" ");
   const imgTokens = tokenise(imageText);
+  if (imgTokens.length === 0) return 0;
 
   let matched = 0;
   for (const t of imgTokens) {
     if (qTokens.has(t)) matched++;
   }
 
-  // Also check sub-string containment for multi-word phrases
+  // Award phrase bonus ONLY if an actual multi-word tag is contained in the query
   const lowerQuery = query.toLowerCase();
-  const lowerImageText = imageText.toLowerCase();
   let phraseBonus = 0;
-  // Check if any 2-word combination from image tags appears in query or vice-versa
   for (const tag of image.tags) {
-    if (lowerQuery.includes(tag.toLowerCase()) || lowerImageText.includes(lowerQuery.slice(0, 20))) {
+    if (tag.length > 4 && lowerQuery.includes(tag.toLowerCase())) {
       phraseBonus += 2;
     }
   }
 
   const total = qTokens.size + imgTokens.length;
-  if (total === 0) return 0;
-  return Math.min(1, (matched * 2 + phraseBonus) / (total + 0.5));
+  return Math.min(1, (matched * 2.5 + phraseBonus) / total);
 }
 
 // ── Lesson-level image history (in-memory, reset on page load) ───────────────
@@ -234,7 +236,7 @@ function recencyScore(filename: string): number {
 
 // ── Main search function ─────────────────────────────────────────────────────
 
-const SIMILARITY_THRESHOLD = 0.05;   // minimum score to use local image
+const SIMILARITY_THRESHOLD = 0.25;   // minimum score to use local image
 
 export interface LocalImageResult {
   image: LocalImage;

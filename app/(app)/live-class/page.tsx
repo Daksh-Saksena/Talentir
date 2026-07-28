@@ -924,7 +924,7 @@ Use the above textbook excerpts to:
             let finalUrl: string;
             let isLocalImage = false;
 
-            if (localResult && localResult.score > 0.04) {
+            if (localResult && localResult.score >= 0.25) {
               console.log("%c[Local Library] Hit! score=", "color:#22c55e", localResult.score.toFixed(3), localResult.image.filename, "query:", combinedQuery);
               finalUrl = localResult.image.url;
               isLocalImage = true;
