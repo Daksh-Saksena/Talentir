@@ -103,7 +103,15 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
   // Keywords to highlight — sourced from the active section
   const [highlightKeywords, setHighlightKeywords] = useState<string[]>([]);
   const [autoHighlight, setAutoHighlight] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const sectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handleFsChange);
+    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+  }, []);
 
   const notify = (msg: string) => {
     setNotification(msg);
@@ -322,7 +330,7 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
       </aside>
 
       {/* ══ CENTRE — PDF viewer ══ */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-slate-950 min-w-0">
+      <main ref={mainRef} className="flex-1 flex flex-col overflow-hidden bg-slate-950 min-w-0 relative">
         {/* Book header bar */}
         {activeBook && (
           <div className="shrink-0 px-4 py-2 border-b border-slate-800 bg-slate-900/60 flex items-center gap-3 flex-wrap">
@@ -366,12 +374,26 @@ export function TextbookView({ isEmbedded = false }: { isEmbedded?: boolean } = 
                 ✨ {highlightKeywords.length} highlight{highlightKeywords.length !== 1 ? "s" : ""}
               </span>
             )}
+            {/* Fullscreen toggle */}
+            <button
+              onClick={() => {
+                if (!document.fullscreenElement) {
+                  mainRef.current?.requestFullscreen().catch(() => {});
+                } else {
+                  document.exitFullscreen().catch(() => {});
+                }
+              }}
+              className="shrink-0 text-xs text-slate-500 hover:text-white transition px-2 py-1 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700 cursor-pointer flex items-center gap-1"
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? "🗗 Exit Fullscreen" : "⛶ Fullscreen"}
+            </button>
             {/* Open directly link */}
             <a
               href={activeBook.hasPdf ? chapterPdfUrl(activeBook.code, activeChapter) : activeBook.pdfUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="shrink-0 text-xs text-slate-500 hover:text-white transition px-2 py-1 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700"
+              className="shrink-0 text-xs text-slate-500 hover:text-white transition px-2 py-1 rounded-lg hover:bg-slate-800 border border-transparent hover:border-slate-700 flex items-center gap-1"
             >
               ↗ Open directly
             </a>
